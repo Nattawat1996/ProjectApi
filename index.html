@@ -1,0 +1,1196 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <title>Game Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root{
+      --bg:#2c3e50; --primary:#3498db; --card:#34495e; --text:#ecf0f1; --border:#4a627a;
+      --success:#27ae60; --warning:#f39c12; --danger:#e74c3c; --muted:#8fa6bb;
+    }
+    *{ box-sizing:border-box }
+    body{ margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,system-ui,sans-serif; background:var(--bg); color:var(--text); height:100vh; display:flex; font-size:14px; }
+    .dashboard{ display:grid; grid-template-columns: 360px 1fr 420px; width:100%; }
+    @media (max-width:1280px){ .dashboard{ grid-template-columns:340px 1fr; } .inspector{ display:none; } }
+
+    /* Sidebar */
+    .sidebar{ background:var(--card); border-right:1px solid var(--border); display:flex; flex-direction:column; padding:16px 14px; overflow-y:auto; }
+    .sidebar-header{ display:flex; align-items:center; justify-content:space-between; margin:0 0 10px 6px; }
+    .sidebar h2{ margin:0; font-size:18px; }
+    .player-list-wrapper{ flex:1; }
+
+    /* Gear (filter) button */
+    .gear-btn{ background:transparent; border:1px solid var(--border); color:#dfeaf6; border-radius:10px; padding:8px 10px; cursor:pointer; font-size:16px; line-height:1; box-shadow:inset 0 0 0 2px rgba(255,255,255,.05); }
+    .gear-btn:hover{ box-shadow:0 0 0 2px rgba(52,152,219,.25) inset; }
+
+    /* Sidebar Filter Panel */
+    .filter-panel{ display:none; background:#2f445a; border:1px solid var(--border); border-radius:10px; padding:12px; margin:6px 0 10px; }
+    .filter-panel.open{ display:block; }
+    .filter-row{ display:flex; flex-direction:column; gap:6px; margin-bottom:8px; }
+    .radio-row{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; color:#e5f0ff; }
+    .filter-actions{ display:flex; gap:8px; }
+    .btn{ display:inline-flex; align-items:center; justify-content:center; gap:6px; padding:10px 12px; border-radius:8px; border:1px solid var(--border); background:#2e4156; color:var(--text); cursor:pointer; font-weight:700; }
+    .btn[disabled]{ opacity:.5; cursor:not-allowed }
+    .mini{ padding:6px 8px; font-size:12px; }
+
+    /* ห้องแบบสรุป + accordion */
+    .room-card { margin: 10px 0 14px; border-radius: 10px; }
+    .room-header{ font-weight:800; margin:6px 4px 8px; font-size:13px; color:#cfe1f5; display:flex; align-items:center; gap:8px; }
+    .room-header .room-pill{ font-size:11px; padding:2px 6px; border-radius:999px; background:#2f445a; border:1px solid var(--border); }
+    .room-header.clickable { cursor: pointer; user-select: none; }
+    .room-summary { margin: 6px 4px 4px; display: flex; flex-wrap: wrap; gap: 6px; }
+    .room-details { margin-top: 6px; }
+    .caret { display: inline-block; margin-right: 6px; opacity: .85; transition: transform .15s; }
+    .caret.open { transform: rotate(90deg); }
+
+    .player-card{ padding:10px 12px; margin:8px 0; border-radius:8px; border:1px solid var(--border); cursor:pointer; background:#3a5066; transition:.15s; }
+    .player-card:hover{ transform:translateY(-1px); box-shadow:0 4px 10px rgba(0,0,0,.15) }
+    .player-card.active{ outline:2px solid var(--primary); box-shadow:0 0 0 2px rgba(52,152,219,.3) inset }
+    .player-name{ font-weight:700; display:flex; align-items:center; gap:8px; }
+    .online-badge{ font-size:11px; font-weight:700; letter-spacing:.2px; padding:2px 6px; border-radius:999px; background:rgba(39,174,96,.15); color:#b6f3c8; border:1px solid rgba(39,174,96,.35); }
+    .player-sub{ margin-top:6px; font-size:12px; color:#d6e2ee; display:flex; flex-direction:column; gap:4px; }
+    .coin-line,.limit-line{ display:flex; align-items:center; gap:6px; color:#e3eef9; }
+    .coin-line::before{ content:"💰"; opacity:.9 }
+    .limit-line::before{ content:"🎁"; opacity:.9 }
+
+    .chip{ display:inline-flex; align-items:center; gap:6px; padding:2px 8px; border-radius:999px; background:#223445; border:1px solid #3c556e; font-size:12px; }
+    .summary-line{ display:flex; align-items:flex-start; gap:6px; flex-wrap:wrap; margin-top:6px; }
+    .summary-line .label{ font-size:12px; opacity:.85; margin-top:2px; }
+
+    /* Center */
+    .center{ padding:18px 20px; overflow-y:auto; border-right:1px solid var(--border); }
+    .card{ border:1px solid var(--border); background:#2f445a; border-radius:10px; padding:12px 14px; margin-bottom:12px; }
+    .card h3{ margin:0 0 8px; }
+    .header-row{ display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
+    .metrics{ display:grid; grid-template-columns: repeat(auto-fit, minmax(160px,1fr)); gap:10px; }
+    .metric{ background:#22364a; border:1px solid #3b5976; border-radius:8px; padding:10px; }
+    .metric .k{ font-size:12px; opacity:.8 }
+    .metric .v{ font-size:18px; font-weight:800; margin-top:2px; }
+    .chips-grid{ display:flex; flex-wrap:wrap; gap:6px; }
+    .muted{ color:#c9d7e6 }
+    .right{ text-align:right }
+
+    /* Inspector */
+    .inspector{ padding:16px; overflow-y:auto; background:var(--bg); }
+    .inspector h3{ margin:4px 0 8px; }
+    .tabs{ display:flex; gap:2px; border-bottom:1px solid var(--border); padding-bottom:6px; }
+    .tab{ padding:8px 12px; border:none; background:transparent; color:#dfeaf6; opacity:.7; cursor:pointer; font-weight:700; }
+    .tab.active{ opacity:1; border-bottom:2px solid var(--primary); color:#fff; }
+    .tool-row{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:6px 0 8px; }
+    .list{ border:1px solid var(--border); border-radius:8px; background:#2b3f55; overflow:auto; }
+
+    /* Inputs */
+    select, input[type="number"], input[type="text"]{ width:100%; padding:8px; border-radius:8px; border:1px solid var(--border); background:var(--bg); color:#ecf0f1; }
+
+    /* MultiSelect */
+    .ms{ position:relative; }
+    .ms-control{ min-height:40px; padding:6px 34px 6px 10px; border:1px solid var(--border); background:var(--bg); border-radius:8px; display:flex; align-items:center; gap:6px; flex-wrap:wrap; cursor:pointer; }
+    .ms-placeholder{ color:#9fb4ca; }
+    .ms-chip{ display:inline-flex; align-items:center; gap:6px; padding:2px 8px; border-radius:999px; font-size:12px; background:#223445; border:1px solid #3c556e; color:#eaf3ff; }
+    .ms-chip .x{ font-weight:700; cursor:pointer; opacity:.8 }
+    .ms-caret{ position:absolute; right:10px; top:50%; transform:translateY(-50%); opacity:.7; }
+    .ms-dropdown{ position:absolute; left:0; right:0; top:calc(100% + 6px); background:var(--card); border:1px solid var(--border); border-radius:8px; z-index:10; display:none; max-height:clamp(220px,45vh,420px); overflow:auto; box-shadow:0 6px 20px rgba(0,0,0,.3); }
+    .ms.open .ms-dropdown{ display:block; }
+    .ms-dropdown.up{ top:auto; bottom:calc(100% + 6px); }
+    .ms-actions{ display:flex; justify-content:space-between; gap:6px; padding:8px; border-bottom:1px solid var(--border); }
+    .ms-actions button{ background:#2e4156; border:1px solid var(--border); color:#dfeaf6; border-radius:6px; padding:6px 8px; cursor:pointer; }
+    .ms-search{ padding:8px; border-bottom:1px solid var(--border); }
+    .ms-search input{ width:100%; padding:8px; border-radius:6px; border:1px solid var(--border); background:var(--bg); color:#eaf3ff; }
+    .ms-option{ padding:8px 10px; display:flex; align-items:center; gap:8px; border-bottom:1px solid rgba(255,255,255,.05); }
+    .ms-option:last-child{ border-bottom:none }
+    .ms-empty{ padding:10px; color:#9fb4ca; }
+    .ms-option.disabled { opacity: .55; }
+    .ms-option.disabled input { pointer-events: none; }
+    .ms-option .lock { margin-left: auto; font-size: 12px; opacity: .8; }
+
+    /* Modals */
+    .modal{ display:none; position:fixed; inset:0; background:rgba(0,0,0,.7); align-items:center; justify-content:center; z-index:1000; }
+    .panel{ background:var(--bg); border:1px solid var(--border); border-radius:12px; width:min(1100px,96vw); height:min(85vh,880px); display:flex; overflow:hidden; box-shadow:0 10px 40px rgba(0,0,0,.5); }
+    .panel-left{ width:340px; background:var(--card); border-right:1px solid var(--border); padding:18px; display:flex; flex-direction:column; gap:10px; overflow-y:auto; }
+    .panel-right{ flex:1; display:flex; flex-direction:column; padding:18px; gap:12px; min-height:0; }
+    .row{ display:flex; align-items:center; gap:12px; padding:10px 12px; border-bottom:1px solid var(--border); }
+    .row:last-child{ border-bottom:none }
+    .grow{ flex:1 }
+    .actions{ display:flex; gap:8px; align-items:center; }
+    .qty{ width:90px; text-align:center }
+    .toggle{ padding:6px 10px; border-radius:8px; border:1px solid var(--border); background:var(--bg); color:var(--text); cursor:pointer; }
+    .toggle.selected{ background:var(--success); border-color:#fff; }
+
+    /* === Task Drawer & Progress === */
+    .task-drawer{ position: fixed; right: 12px; bottom: 12px; width: 360px; max-height: 60vh;
+      background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+      box-shadow: 0 10px 30px rgba(0,0,0,.4); display:flex; flex-direction:column; overflow: hidden; z-index: 2000; }
+    .task-drawer.hidden{ display:none; }
+    .task-drawer header{ display:flex; align-items:center; justify-content:space-between; padding:10px 12px; border-bottom:1px solid var(--border); }
+    .task-list{ overflow:auto; padding:8px 12px; display:flex; flex-direction:column; gap:8px; }
+    .task-card{ border:1px solid var(--border); border-radius:10px; padding:8px 10px; background:#2b3f55; }
+    .task-title{ display:flex; align-items:center; justify-content:space-between; font-weight:700; gap:8px; }
+    .task-sub{ font-size:12px; color:#cbd8e6; display:flex; gap:6px; flex-wrap:wrap; margin-top:4px;}
+    .pill{ padding:2px 6px; border:1px solid #3b5976; border-radius:999px; font-size:11px; background:#22364a; }
+
+    .progress{ margin-top:8px; height:10px; background:#1e2f40; border:1px solid #3b5976; border-radius:999px; overflow:hidden; position:relative; }
+    .progress-bar{ height:100%; width:0%; background: linear-gradient(90deg, #3fb37f, #2ecc71); transition: width .4s ease; }
+    .progress-bar.stripes{ background-image: repeating-linear-gradient(45deg, rgba(255,255,255,.2) 0 8px, rgba(255,255,255,.1) 8px 16px); background-color:#2ecc71; animation: move 1s linear infinite; }
+    @keyframes move{ from{ background-position:0 0 } to{ background-position: 40px 0 } }
+
+    .status-ok{ color:#9ef2b8 } .status-warn{ color:#ffd27f } .status-err{ color:#ff9aa2 }
+  </style>
+</head>
+<body>
+  <div class="dashboard">
+    <!-- LEFT -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <h2>Players with Script</h2>
+        <button id="sidebar-filter-btn" class="gear-btn" title="ตัวกรอง">⚙</button>
+      </div>
+
+      <!-- Sidebar Filters -->
+      <div id="sidebar-filter-panel" class="filter-panel">
+        <div class="filter-row">
+          <div class="radio-row"><b>ไข่ (Egg summary)</b></div>
+          <div id="side-ms-eggtypes"></div>
+          <div id="side-ms-mutas" style="margin-top:6px;"></div>
+          <div class="radio-row">
+            โหมด:
+            <label><input type="radio" name="eggMode" value="show" checked> แสดงที่เลือก</label>
+            <label><input type="radio" name="eggMode" value="hide"> ซ่อนที่เลือก</label>
+            <label style="margin-left:auto;"><input type="checkbox" id="side-only-unplaced" checked> นับเฉพาะไข่ที่ยังไม่วาง</label>
+          </div>
+        </div>
+        <div class="filter-row">
+          <div class="radio-row"><b>ผลไม้ (Food summary)</b></div>
+          <div id="side-ms-foods"></div>
+          <div class="radio-row">
+            โหมด:
+            <label><input type="radio" name="foodMode" value="show" checked> แสดงที่เลือก</label>
+            <label><input type="radio" name="foodMode" value="hide"> ซ่อนที่เลือก</label>
+          </div>
+        </div>
+        <div class="filter-actions">
+          <button id="sidebar-filter-apply" class="btn mini">บันทึก</button>
+          <button id="sidebar-filter-reset" class="btn mini">รีเซ็ต</button>
+          <button id="sidebar-filter-close" class="btn mini">ปิด</button>
+        </div>
+      </div>
+
+      <!-- ROOM LIST (aggregated) -->
+      <div id="player-list" class="player-list-wrapper"></div>
+
+      <button id="open-distributor-btn" class="btn">Egg&Food Distributor</button>
+      <button id="open-trade-btn" class="btn" disabled>Trade System</button>
+    </aside>
+
+    <!-- CENTER -->
+    <main class="center">
+      <div class="card">
+        <div class="header-row">
+          <div>
+            <h3 id="sel-title">Selected: -</h3>
+            <div id="sel-sub" class="muted"></div>
+          </div>
+          <div class="actions">
+            <button id="quick-open-dist" class="btn">Egg&Food Distributor</button>
+            <button id="quick-open-trade" class="btn" style="background:var(--warning);color:#000;border:none;">Trade</button>
+          </div>
+        </div>
+        <div class="metrics" id="sel-metrics"></div>
+      </div>
+
+      <div class="card">
+        <h3>Room Overview</h3>
+        <div id="room-sub" class="muted">—</div>
+        <div class="section-title">🥚 Eggs (ตามตัวกรอง)</div>
+        <div class="chips-grid" id="room-eggs"></div>
+        <div class="section-title" style="margin-top:10px;">🍓 Foods (ตามตัวกรอง)</div>
+        <div class="chips-grid" id="room-foods"></div>
+      </div>
+    </main>
+
+    <!-- RIGHT -->
+    <aside class="inspector">
+      <h3>Inventory Inspector</h3>
+      <div class="muted">Player: <span id="insp-player">-</span></div>
+      <div class="tabs" id="insp-tabs"></div>
+      <div class="tool-row" id="insp-tools"></div>
+      <div class="list" id="insp-list"></div>
+    </aside>
+  </div>
+
+  <!-- Trade Modal -->
+  <div id="trade-modal" class="modal">
+    <div class="panel">
+      <div class="panel-left">
+        <div class="header-row"><h3>Trade Control</h3><button class="btn mini" onclick="closeTradeModal()">ปิด</button></div>
+        <select id="trade-target-select"><option value="">-- เลือกผู้รับ (ในห้องนี้) --</option></select>
+        <button class="btn" id="send-trade-btn" disabled>ส่ง <span id="trade-selection-count">(0)</span> ชิ้น</button>
+      </div>
+      <div class="panel-right">
+        <h3>Inventory ของคุณ</h3>
+        <div class="tabs" id="trade-tabs"></div>
+        <div class="list" id="trade-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Distributor Modal -->
+  <div id="dist-modal" class="modal">
+    <div class="panel">
+      <div class="panel-left">
+        <div class="header-row"><h3>Egg & Food Distributor</h3><button class="btn mini" onclick="closeDistModal()">ปิด</button></div>
+
+        <label>Receiver (ผู้เล่นในห้องนี้)</label>
+        <select id="dist-receiver"></select>
+
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
+          <label style="margin:8px 0 0">Senders</label>
+          <div>
+            <button id="senders-all" class="btn mini">เลือกทั้งหมด</button>
+            <button id="senders-clear" class="btn mini">ล้าง</button>
+          </div>
+        </div>
+        <div id="ms-senders"></div>
+
+        <!-- โหมด: Eggs / Foods -->
+        <div style="margin-top:8px;">
+          <div class="radio-row"><b>โหมดการกระจาย</b>
+            <label style="margin-left:8px;"><input type="radio" name="distMode" value="eggs" checked> Eggs</label>
+            <label><input type="radio" name="distMode" value="foods"> Foods</label>
+          </div>
+        </div>
+
+        <!-- Section: Eggs -->
+        <div id="dist-eggs-section">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
+            <label>Egg Type</label>
+            <div>
+              <button id="types-all" class="btn mini">เลือกทั้งหมด</button>
+              <button id="types-clear" class="btn mini">ล้าง</button>
+            </div>
+          </div>
+          <div id="ms-types"></div>
+
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
+            <label>Mutation</label>
+            <div>
+              <button id="mutas-all" class="btn mini">เลือกทั้งหมด</button>
+              <button id="mutas-clear" class="btn mini">ล้าง</button>
+            </div>
+          </div>
+          <div id="ms-mutas"></div>
+
+          <label>จำนวนที่ต้องการ (รวมต่อเงื่อนไข)</label>
+          <input id="dist-qty" type="number" min="1" step="1" placeholder="เช่น 100" />
+        </div>
+
+        <!-- Section: Foods -->
+        <div id="dist-foods-section" style="display:none;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
+            <label>Food Items</label>
+            <div>
+              <button id="foods-all" class="btn mini">เลือกทั้งหมด</button>
+              <button id="foods-clear" class="btn mini">ล้าง</button>
+            </div>
+          </div>
+          <div id="ms-foods-dist"></div>
+
+          <label>จำนวนที่ต้องการ <b>ต่อชนิด</b></label>
+          <input id="dist-qty-food" type="number" min="1" step="1" placeholder="เช่น 50 (ต่อชนิด)" />
+        </div>
+
+        <div class="actions" style="gap:10px;margin-top:10px;">
+          <button id="dist-calc" class="btn" disabled>คำนวณ</button>
+          <button id="dist-send" class="btn" disabled style="background:var(--success);border:1px solid #9ee6b9;color:#022b19;">ส่งตามแผน</button>
+        </div>
+        <div id="dist-hint" class="muted" style="margin-top:6px;"></div>
+      </div>
+
+      <div class="panel-right">
+        <h3>แผนการกระจาย (ใกล้เคียงกันที่สุด)</h3>
+        <div class="list" id="dist-result" style="padding:0;overflow:auto;">
+          <table id="dist-table" style="width:100%;border-collapse:collapse;">
+            <thead>
+              <tr>
+                <th>Sender</th>
+                <th id="dist-col-have">มีไข่ (ตรงเงื่อนไข)</th>
+                <th>ส่งไปแล้ว/วัน</th>
+                <th>ส่งได้อีก</th>
+                <th class="right">จะส่ง</th>
+              </tr>
+            </thead>
+            <tbody id="dist-tbody"><tr><td colspan="5" class="muted">เลือกผู้ส่ง + โหมด + ตัวเลือก และจำนวน แล้วกด “คำนวณ”</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Task Drawer -->
+  <div id="task-drawer" class="task-drawer hidden">
+    <header>
+      <div>Progress</div>
+      <div>
+        <button id="task-min" class="btn mini">ย่อ</button>
+        <button id="task-close" class="btn mini">ปิด</button>
+      </div>
+    </header>
+    <div id="task-list" class="task-list"></div>
+  </div>
+
+  <script>
+    /* ======= MultiSelect ======= */
+    class MultiSelect{
+      constructor(root,{placeholder='เลือก...',onChange}={}){ this.root=root; this.placeholder=placeholder; this.onChange=onChange||function(){}; this.options=[]; this.selected=new Set();
+        this.el=document.createElement('div'); this.el.className='ms';
+        this.el.innerHTML=`<div class="ms-control"><span class="ms-placeholder">${this.placeholder}</span><span class="ms-caret">▾</span></div>
+        <div class="ms-dropdown"><div class="ms-actions"><button data-act="all">เลือกทั้งหมด</button><button data-act="clear">ล้าง</button></div><div class="ms-search"><input type="text" placeholder="ค้นหา..."></div><div class="ms-options"></div></div>`;
+        root.innerHTML=''; root.appendChild(this.el);
+        this.control=this.el.querySelector('.ms-control'); this.dropdown=this.el.querySelector('.ms-dropdown'); this.optionsBox=this.el.querySelector('.ms-options'); this.search=this.el.querySelector('.ms-search input');
+        this.control.addEventListener('click',()=>this.toggle()); this.search.addEventListener('input',()=>this.filter(this.search.value));
+        this.dropdown.querySelector('[data-act="all"]').onclick=()=>this.setSelected(this.options.slice()); this.dropdown.querySelector('[data-act="clear"]').onclick=()=>this.setSelected([]);
+        document.addEventListener('click',e=>{ if(!this.el.contains(e.target)) this.close(); }); window.addEventListener('resize',()=>{ if(this.el.classList.contains('open')) this.adjustDropDirection(); });
+      }
+      adjustDropDirection(){ const r=this.el.getBoundingClientRect(); const below=window.innerHeight-r.bottom; const above=r.top; const up=below<260 && above>below; this.dropdown.classList.toggle('up',up); }
+      setOptions(list,{preselectAll=false,keepSelection=false}={}){ const prev=new Set(keepSelection?this.selected:[]); this.options=Array.from(new Set((list||[]).map(String))); this.selected=preselectAll?new Set(this.options):new Set(Array.from(prev).filter(v=>this.options.includes(v))); this.renderOptions(); this.renderControl(); this.onChange(this.getSelected()); }
+      setSelected(arr){ this.selected=new Set((arr||[]).filter(v=>this.options.includes(v))); this.renderOptions(); this.renderControl(); this.onChange(this.getSelected()); }
+      getSelected(){ return Array.from(this.selected); }
+      selectAll(){ this.setSelected(this.options.slice()); } clear(){ this.setSelected([]); }
+      open(){ this.el.classList.add('open'); this.search.value=''; this.filter(''); this.adjustDropDirection(); }
+      close(){ this.el.classList.remove('open'); }
+      toggle(){ this.el.classList.contains('open')?this.close():this.open(); }
+      filter(q){ const t=q.toLowerCase(); let shown=0; for(const opt of this.optionsBox.querySelectorAll('.ms-option')){ const v=opt.dataset.value||''; const vis=v.toLowerCase().includes(t); opt.style.display=vis?'':'none'; if(vis) shown++; } let empty=this.optionsBox.querySelector('.ms-empty'); if(!empty){ empty=document.createElement('div'); empty.className='ms-empty'; this.optionsBox.appendChild(empty); } empty.textContent=shown===0?'ไม่พบรายการ':''; }
+      renderOptions(){ this.optionsBox.innerHTML=''; for(const v of this.options){ const row=document.createElement('div'); row.className='ms-option'; row.dataset.value=v; row.innerHTML=`<input type="checkbox" ${this.selected.has(v)?'checked':''}/> <span>${v}</span>`; row.querySelector('input').addEventListener('change',e=>{ if(e.target.checked) this.selected.add(v); else this.selected.delete(v); this.renderControl(); this.onChange(this.getSelected()); }); this.optionsBox.appendChild(row); } this.filter(this.search.value||''); }
+      renderControl(){ const box=this.control; box.innerHTML=''; const chips=document.createElement('div'); chips.style.display='flex'; chips.style.flexWrap='wrap'; chips.style.gap='6px';
+        if(this.selected.size===0){ const span=document.createElement('span'); span.className='ms-placeholder'; span.textContent=this.placeholder; box.appendChild(span); }
+        else{ for(const v of this.selected){ const chip=document.createElement('span'); chip.className='ms-chip'; chip.innerHTML=`<span>${v}</span><span class="x">×</span>`; chip.querySelector('.x').onclick=e=>{ e.stopPropagation(); this.selected.delete(v); this.renderOptions(); this.renderControl(); this.onChange(this.getSelected()); }; chips.appendChild(chip); } box.appendChild(chips); }
+        const caret=document.createElement('span'); caret.className='ms-caret'; caret.textContent='▾'; box.appendChild(caret);
+      }
+    }
+
+    /* ======= State / helpers ======= */
+    let playersData = {};
+    let selectedPlayer = null;
+    let expandedRooms = new Set();
+    let roomsAutoExpanded = new Set();
+    const DAILY_LIMIT = 500;
+
+    let msSideEggTypes=null, msSideMutas=null, msSideFoods=null;
+    const sidebarPrefsDefault = { eggTypes:[], mutas:[], eggMode:'show', onlyUnplaced:true, foods:[], foodMode:'show' };
+    let sidebarPrefs = loadSidebarPrefs();
+
+    const nowSec = ()=>Math.floor(Date.now()/1000);
+    const toInt = (v,d=0)=>{ const n=Number(v); return Number.isFinite(n)?n:d; };
+    const coinsStr = (pd)=> toInt(pd?.coin,0).toLocaleString();
+
+    const isOnline = (pd)=>{
+      if(!pd || !pd.serverLastSeen) return false;
+      const interval = Math.max(2, toInt(pd.updateInterval, 2));
+      const grace = Math.max(20, 5 * interval);
+      return (nowSec() - toInt(pd.serverLastSeen,0)) <= grace;
+    };
+    const onlyOnlineNames = ()=> Object.keys(playersData).filter(n=>isOnline(playersData[n])).sort();
+
+    // Slim/Full helpers
+    function buildSlimFromFull(pd){
+      const inv = pd?.inventory; if(!inv) return {};
+      const eggsAggMap = new Map();
+      (inv.eggs||[]).forEach(e => { if(e.placed) return; const k = `${e.type}|${e.mutation||'None'}`; eggsAggMap.set(k, (eggsAggMap.get(k)||0)+1); });
+      const eggsAgg = Array.from(eggsAggMap.entries()).map(([k,c])=>{ const [type,muta]=k.split('|'); return {type, muta, count:c}; }).sort((a,b)=>b.count-a.count||a.type.localeCompare(b.type));
+      const foods = (inv.foods||[]).map(f=>({name:f.name, qty:toInt(f.quantity,0)})).filter(x=>x.qty>0).sort((a,b)=>b.qty-a.qty||a.name.localeCompare(b.name));
+      const petsUnplaced = (inv.pets||[]).filter(p=>!p.placed).length;
+      const eggsUnplaced = (inv.eggs||[]).filter(e=>!e.placed).length;
+      return { eggsAgg, foods, petsUnplaced, eggsUnplaced };
+    }
+    const getSlim = (pd)=> pd?.inventorySlim || buildSlimFromFull(pd);
+    const getFull = (pd)=> pd?.inventory || null;
+    const hasFreshFull = (pd)=> !!(pd?.inventory && pd?.fullTS && (nowSec() - toInt(pd.fullTS,0) <= 25));
+
+    function hashShort(s){ let h=2166136261>>>0; for(let i=0;i<s.length;i++){ h^=s.charCodeAt(i); h=Math.imul(h,16777619);} return (h>>>0).toString(36).slice(0,4).toUpperCase(); }
+
+    /* ======= Sidebar Filters ======= */
+    function loadSidebarPrefs(){ try{ const t=localStorage.getItem('sidebarPrefs'); if(t) return {...sidebarPrefsDefault,...JSON.parse(t)}; }catch(_){ } return {...sidebarPrefsDefault}; }
+    function saveSidebarPrefs(){ try{ localStorage.setItem('sidebarPrefs', JSON.stringify(sidebarPrefs)); }catch(_){ } }
+
+    document.getElementById('sidebar-filter-btn').onclick=()=>{
+      const panel=document.getElementById('sidebar-filter-panel');
+      panel.classList.toggle('open');
+      if(panel.classList.contains('open')) buildSidebarFilterOptions();
+    };
+    document.getElementById('sidebar-filter-close').onclick=()=>document.getElementById('sidebar-filter-panel').classList.remove('open');
+    document.getElementById('sidebar-filter-reset').onclick=()=>{
+      sidebarPrefs={...sidebarPrefsDefault}; saveSidebarPrefs(); buildSidebarFilterOptions(); renderAll();
+    };
+    document.getElementById('sidebar-filter-apply').onclick=()=>{
+      sidebarPrefs.eggTypes=msSideEggTypes.getSelected();
+      sidebarPrefs.mutas=msSideMutas.getSelected();
+      sidebarPrefs.foods=msSideFoods.getSelected();
+      sidebarPrefs.eggMode=document.querySelector('input[name="eggMode"]:checked').value;
+      sidebarPrefs.foodMode=document.querySelector('input[name="foodMode"]:checked').value;
+      sidebarPrefs.onlyUnplaced=document.getElementById('side-only-unplaced').checked;
+      saveSidebarPrefs();
+      renderAll();
+      document.getElementById('sidebar-filter-panel').classList.remove('open');
+    };
+
+    function buildSidebarFilterOptions(){
+      if(!msSideEggTypes) msSideEggTypes=new MultiSelect(document.getElementById('side-ms-eggtypes'),{placeholder:'เลือก Egg Type'});
+      if(!msSideMutas)   msSideMutas  =new MultiSelect(document.getElementById('side-ms-mutas'),{placeholder:'เลือก Mutation'});
+      if(!msSideFoods)   msSideFoods  =new MultiSelect(document.getElementById('side-ms-foods'),{placeholder:'เลือกชนิดผลไม้'});
+
+      const types=new Set(), mutas=new Set(['None']), foods=new Set();
+      for(const n of Object.keys(playersData)){
+        const sl=getSlim(playersData[n]);
+        (sl.eggsAgg||[]).forEach(e=>{ types.add(e.type); mutas.add(e.muta||'None'); });
+        (sl.foods||[]).forEach(f=>foods.add(f.name));
+      }
+      msSideEggTypes.setOptions([...types].sort());
+      msSideMutas.setOptions([...mutas].sort());
+      msSideFoods.setOptions([...foods].sort());
+
+      msSideEggTypes.setSelected(sidebarPrefs.eggTypes);
+      msSideMutas.setSelected(sidebarPrefs.mutas);
+      msSideFoods.setSelected(sidebarPrefs.foods);
+      (document.querySelector(`input[name="eggMode"][value="${sidebarPrefs.eggMode}"]`)||{}).checked=true;
+      (document.querySelector(`input[name="foodMode"][value="${sidebarPrefs.foodMode}"]`)||{}).checked=true;
+      document.getElementById('side-only-unplaced').checked=!!sidebarPrefs.onlyUnplaced;
+    }
+
+    function passesEggVisibility(type,muta){
+      const selT=sidebarPrefs.eggTypes, selM=sidebarPrefs.mutas;
+      const hasSel=(selT&&selT.length)||(selM&&selM.length);
+      const match=(!selT.length||selT.includes(type)) && (!selM.length||selM.includes(muta||'None'));
+      if(!hasSel) return true;
+      return sidebarPrefs.eggMode==='hide' ? !match : match;
+    }
+    function passesFoodVisibility(name){
+      const sel=sidebarPrefs.foods||[]; if(!sel.length) return true;
+      return sidebarPrefs.foodMode==='hide' ? !sel.includes(name) : sel.includes(name);
+    }
+
+    /* ======= Group by Room ======= */
+    function groupByRoom(){
+      const names=onlyOnlineNames(); const groups=new Map();
+      for(const name of names){
+        const serverList=playersData[name]?.serverPlayerList||[];
+        const inRoom=serverList.filter(n=>names.includes(n));
+        if(!inRoom.includes(name)) inRoom.push(name);
+        const key=JSON.stringify(inRoom.sort());
+        if(!groups.has(key)) groups.set(key,{members:[]});
+        groups.get(key).members.push(name);
+      }
+      return Array.from(groups.entries())
+        .map(([k,v])=>({roomKey:k, roomId:hashShort(k), members:v.members.sort()}))
+        .sort((a,b)=>b.members.length-a.members.length);
+    }
+
+    /* ======= Aggregate helpers ======= */
+    function aggregateForNames(names){
+      const eggMap = new Map();
+      const foodMap = new Map();
+      for (const n of names) {
+        const sl = getSlim(playersData[n] || {});
+        (sl.eggsAgg || []).forEach(e => {
+          if (!passesEggVisibility(e.type, e.muta)) return;
+          const k = `${e.type}|${e.muta}`;
+          eggMap.set(k, (eggMap.get(k) || 0) + toInt(e.count, 0));
+        });
+        (sl.foods || []).forEach(f => {
+          if (!passesFoodVisibility(f.name)) return;
+          foodMap.set(f.name, (foodMap.get(f.name) || 0) + toInt(f.qty, 0));
+        });
+      }
+      const eggAgg = Array.from(eggMap.entries())
+        .map(([k, c]) => { const [t, m] = k.split('|'); return { type: t, muta: m, count: c }; })
+        .sort((a, b) => b.count - a.count || a.type.localeCompare(b.type));
+      const foodAgg = Array.from(foodMap.entries())
+        .map(([n, q]) => ({ name: n, qty: q }))
+        .sort((a, b) => b.qty - a.qty || a.name.localeCompare(b.name));
+      return { eggAgg, foodAgg };
+    }
+
+    /* ======= Sidebar render ======= */
+    function renderPlayerList(){
+      const wrap=document.getElementById('player-list'); wrap.innerHTML='';
+      const groups=groupByRoom();
+      if(groups.length===0){ wrap.innerHTML=`<div class="muted" style="padding:6px 8px;">ไม่มีผู้ใช้สคริปต์ที่ออนไลน์</div>`; return; }
+
+      for(const g of groups){
+        const roomMembers=[...new Set(JSON.parse(g.roomKey))];
+        const roomId=g.roomId;
+
+        // auto-expand ครั้งเดียวต่อห้อง
+        if (selectedPlayer && roomMembers.includes(selectedPlayer) && !expandedRooms.has(roomId) && !roomsAutoExpanded.has(roomId)) {
+          expandedRooms.add(roomId); roomsAutoExpanded.add(roomId);
+        }
+
+        const {eggAgg, foodAgg}=aggregateForNames(roomMembers);
+
+        const section=document.createElement('div'); section.className='room-card';
+
+        const header=document.createElement('div');
+        const open=expandedRooms.has(roomId);
+        header.className='room-header clickable';
+        header.innerHTML=`<span class="caret ${open?'open':''}">▸</span> Room <span class="room-pill">${roomId}</span> • ${roomMembers.length} players`;
+        header.onclick=()=>{ if(expandedRooms.has(roomId)) expandedRooms.delete(roomId); else expandedRooms.add(roomId); renderPlayerList(); };
+        section.appendChild(header);
+
+        const summary=document.createElement('div'); summary.className='room-summary';
+        const eggsTop = eggAgg.slice(0,10).map(g=>`<span class="chip">🥚 ${g.type}/${g.muta} × ${g.count}</span>`).join(' ');
+        const foodsTop= foodAgg.slice(0,10).map(f=>`<span class="chip">🍓 ${f.name} × ${f.qty}</span>`).join(' ');
+        summary.innerHTML=(eggsTop||foodsTop)?`${eggsTop} ${foodsTop}`:`<span class="muted">— ไม่มีข้อมูลตามตัวกรอง —</span>`;
+        section.appendChild(summary);
+
+        const details=document.createElement('div'); details.className='room-details'; details.style.display=open?'':'none';
+        if(open){
+          const onlineSet=new Set(onlyOnlineNames());
+          const members=roomMembers.filter(n=>onlineSet.has(n)).sort();
+          for(const name of members){
+            const d=playersData[name]; const sl=getSlim(d);
+            const eggList=(sl.eggsAgg||[]).filter(x=>passesEggVisibility(x.type,x.muta));
+            const foodList=(sl.foods||[]).filter(x=>passesFoodVisibility(x.name));
+            const card=document.createElement('div'); card.className='player-card'+(name===selectedPlayer?' active':'');
+            card.innerHTML=`<div class="player-name"><span>${name}</span><span class="online-badge">ONLINE</span></div>
+              <div class="player-sub">
+                <div class="coin-line">${coinsStr(d)}</div>
+                <div class="limit-line">${toInt(d?.todayGiftCount,0)} / ${DAILY_LIMIT}</div>
+                ${eggList.length?`<div class="summary-line"><span class="label">🥚</span>${eggList.slice(0,6).map(g=>`<span class="chip">${g.type}/${g.muta} × ${g.count}</span>`).join(' ')}${eggList.length>6?`<span class="chip">+${eggList.length-6}</span>`:''}</div>`:''}
+                ${foodList.length?`<div class="summary-line"><span class="label">🍓</span>${foodList.slice(0,6).map(f=>`<span class="chip">${f.name} × ${f.qty}</span>`).join(' ')}${foodList.length>6?`<span class="chip">+${foodList.length-6}</span>`:''}</div>`:''}
+              </div>`;
+            card.onclick=(e)=>{ selectedPlayer = (selectedPlayer===name)? null : name; renderAll(); e.stopPropagation(); };
+            details.appendChild(card);
+          }
+        }
+        section.appendChild(details);
+        wrap.appendChild(section);
+      }
+      refreshButtons();
+    }
+
+    /* ======= Center Overview ======= */
+    function roomNamesOfSelected(){
+      if(!selectedPlayer || !playersData[selectedPlayer]) return [];
+      const online=new Set(onlyOnlineNames()); const room=playersData[selectedPlayer]?.serverPlayerList||[];
+      return room.filter(n=>online.has(n));
+    }
+    function renderCenter(){
+      const title=document.getElementById('sel-title'), sub=document.getElementById('sel-sub'), metrics=document.getElementById('sel-metrics');
+      const roomSub=document.getElementById('room-sub'), roomEggs=document.getElementById('room-eggs'), roomFoods=document.getElementById('room-foods');
+
+      document.getElementById('quick-open-dist').onclick=()=>{ if(!selectedPlayer){ alert('โปรดเลือกผู้เล่นก่อน'); return; } openDistModal(); };
+      document.getElementById('quick-open-trade').onclick=()=>{ if(!selectedPlayer){ alert('โปรดเลือกผู้เล่นก่อน'); return; } document.getElementById('open-trade-btn').click(); };
+
+      if(!selectedPlayer || !playersData[selectedPlayer]){ title.textContent='Selected: -'; sub.textContent=''; metrics.innerHTML=''; roomSub.textContent='—'; roomEggs.innerHTML=''; roomFoods.innerHTML=''; return; }
+
+      const me=playersData[selectedPlayer]; const sl=getSlim(me);
+      title.textContent=`Selected: ${selectedPlayer}`; sub.textContent='เปิด Trade System หรือ Egg Distributor ได้จากปุ่มด้านขวา';
+      metrics.innerHTML=`<div class="metric"><div class="k">Coins</div><div class="v">${coinsStr(me)}</div></div>
+        <div class="metric"><div class="k">ส่งของวันนี้</div><div class="v">${toInt(me?.todayGiftCount,0)} / ${DAILY_LIMIT}</div></div>
+        <div class="metric"><div class="k">ไข่ที่ยังไม่วาง</div><div class="v">${toInt(sl?.eggsUnplaced,0)}</div></div>
+        <div class="metric"><div class="k">สัตว์ (ยังไม่วาง)</div><div class="v">${toInt(sl?.petsUnplaced,0)}</div></div>`;
+
+      const rnames=roomNamesOfSelected(); const roomId=hashShort(JSON.stringify(rnames.slice().sort()));
+      roomSub.textContent=rnames.length?`Room ${roomId} • ${rnames.length} players`:'ไม่พบรายชื่อผู้เล่นในห้อง';
+
+      const eggMap=new Map(), foodMap=new Map();
+      for(const n of rnames){
+        const sln=getSlim(playersData[n]);
+        (sln.eggsAgg||[]).forEach(e=>{ if(!passesEggVisibility(e.type,e.muta)) return; const k=`${e.type}|${e.muta}`; eggMap.set(k,(eggMap.get(k)||0)+toInt(e.count,0)); });
+        (sln.foods||[]).forEach(f=>{ if(!passesFoodVisibility(f.name)) return; foodMap.set(f.name,(foodMap.get(f.name)||0)+toInt(f.qty,0)); });
+      }
+      const eggAgg=Array.from(eggMap.entries()).map(([k,c])=>{const [t,m]=k.split('|'); return{type:t,muta:m,count:c};}).sort((a,b)=>b.count-a.count).slice(0,18);
+      const foodAgg=Array.from(foodMap.entries()).map(([n,q])=>({name:n,qty:q})).sort((a,b)=>b.qty-a.qty).slice(0,18);
+      roomEggs.innerHTML = eggAgg.length? eggAgg.map(g=>`<span class="chip">${g.type}/${g.muta} × ${g.count}</span>`).join(' ') : '<span class="muted">—</span>';
+      roomFoods.innerHTML= foodAgg.length? foodAgg.map(g=>`<span class="chip">${g.name} × ${g.qty}</span>`).join(' ')   : '<span class="muted">—</span>';
+    }
+
+    /* ======= Inspector (Full on demand) ======= */
+    function requestFull(player){ return fetch('/command',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({playerName:player,action:'request_full'})}); }
+    function renderInspector(){
+      const t=document.getElementById('insp-player'), tabs=document.getElementById('insp-tabs'), tools=document.getElementById('insp-tools'), list=document.getElementById('insp-list');
+      if(!selectedPlayer || !playersData[selectedPlayer]){ t.textContent='-'; tabs.innerHTML=''; tools.innerHTML=''; list.innerHTML='<div class="muted" style="padding:10px;">ยังไม่ได้เลือกผู้เล่น</div>'; return; }
+      t.textContent=selectedPlayer;
+
+      tabs.innerHTML=`<button class="tab active" data-tab="eggs">🥚 Eggs</button><button class="tab" data-tab="foods">🍓 Foods</button><button class="tab" data-tab="pets">🐾 Pets</button>`;
+      tabs.querySelectorAll('.tab').forEach(b=> b.onclick=()=>{ tabs.querySelectorAll('.tab').forEach(x=>x.classList.remove('active')); b.classList.add('active'); renderTab(b.dataset.tab); });
+
+      const pd=playersData[selectedPlayer];
+      if(!hasFreshFull(pd)) requestFull(selectedPlayer);
+
+      renderTab('eggs');
+
+      function renderTab(tab){
+        tools.innerHTML=''; list.innerHTML='';
+        const pd=playersData[selectedPlayer];
+        const full=getFull(pd); const sl=getSlim(pd);
+
+        if(tab==='eggs'){
+          const rows = full ? (()=>{ const map=new Map(); (full.eggs||[]).forEach(e=>{ if(e.placed) return; const k=`${e.type}|${e.mutation||'None'}`; map.set(k,(map.get(k)||0)+1); }); return Array.from(map.entries()).map(([k,c])=>{const [t,m]=k.split('|'); return{type:t,muta:m,count:c};}).sort((a,b)=>b.count-a.count||a.type.localeCompare(b.type)); })() : (sl.eggsAgg||[]);
+          if(!rows || rows.length===0){ list.innerHTML='<div class="muted" style="padding:10px;">กำลังโหลดข้อมูลเต็มหรือไม่มีรายการ</div>'; }
+          else rows.forEach(r=>{ const row=document.createElement('div'); row.className='row'; row.innerHTML=`<div class="grow"><b>${r.type}</b> <span class="chip">${r.muta}</span></div><div><b>${r.count}</b></div>`; list.appendChild(row); });
+        }else if(tab==='foods'){
+          const rows = full ? (full.foods||[]).map(f=>({name:f.name,qty:toInt(f.quantity,0)})).filter(x=>x.qty>0).sort((a,b)=>b.qty-a.qty) : (sl.foods||[]);
+          if(!rows || rows.length===0){ list.innerHTML='<div class="muted" style="padding:10px;">—</div>'; }
+          else rows.forEach(r=>{ const row=document.createElement('div'); row.className='row'; row.innerHTML=`<div class="grow"><b>${r.name}</b></div><div><b>${r.qty}</b></div>`; list.appendChild(row); });
+        }else if(tab==='pets'){
+          if(!full){ list.innerHTML='<div class="muted" style="padding:10px;">ต้องใช้ Full — ระบบกำลังร้องขอ...</div>'; return; }
+          const rows=(full.pets||[]).filter(p=>!p.placed);
+          if(!rows.length){ list.innerHTML='<div class="muted" style="padding:10px;">—</div>'; }
+          else rows.forEach(p=>{ const row=document.createElement('div'); row.className='row'; row.innerHTML=`<div class="grow"><b>${p.type||'-'}</b> <span class="chip">${p.mutation||'None'}</span><div class="muted">ยังไม่วาง • Income ${toInt(p.income,0)}/s</div></div>`; list.appendChild(row); });
+        }
+      }
+    }
+
+    /* ======= Trade ======= */
+    let tradeSelection={};
+    function myFull(){ return playersData[selectedPlayer]?.inventory || null; }
+    document.getElementById('open-trade-btn').onclick=()=>{
+      if(!selectedPlayer){ alert('โปรดเลือกผู้เล่นก่อน'); return; }
+      if(!hasFreshFull(playersData[selectedPlayer])) requestFull(selectedPlayer);
+      renderTradeUI();
+      document.getElementById('trade-modal').style.display='flex';
+    };
+    function closeTradeModal(){ document.getElementById('trade-modal').style.display='none'; }
+    function countUnplacedEggs(full){ return (full?.eggs||[]).filter(e=>!e.placed).length; }
+    function countUnplacedPets(full){ return (full?.pets||[]).filter(p=>!p.placed).length; }
+
+    function renderTradeUI(){
+      const sel=document.getElementById('trade-target-select');
+      sel.innerHTML=`<option value="">-- เลือกผู้รับ (ในห้องนี้) --</option>`;
+      const me=playersData[selectedPlayer]; (me?.serverPlayerList||[]).forEach(n=>{ if(n!==selectedPlayer) sel.innerHTML+=`<option value="${n}">${n}</option>`; });
+
+      const full=myFull(); const list=document.getElementById('trade-list'), tabs=document.getElementById('trade-tabs');
+      if(!full){ tabs.innerHTML=''; list.innerHTML='<div class="muted" style="padding:12px;">กำลังโหลด Full snapshot...</div>'; document.getElementById('send-trade-btn').disabled=true; return; }
+
+      tradeSelection={}; updateTradeSelectionCount();
+      tabs.innerHTML=`<button class="tab active" onclick="renderTradeTab('pets')">🐾 สัตว์ (${countUnplacedPets(full)})</button>
+                      <button class="tab" onclick="renderTradeTab('eggs')">🥚 ไข่ (${countUnplacedEggs(full)})</button>
+                      <button class="tab" onclick="renderTradeTab('foods')">🍓 ผลไม้ (${(full.foods||[]).filter(x=>x.quantity>0).length})</button>`;
+      renderTradeTab('pets');
+    }
+    function renderTradeTab(cat){
+      document.querySelectorAll('#trade-tabs .tab').forEach(b=>b.classList.remove('active'));
+      const btn=Array.from(document.querySelectorAll('#trade-tabs .tab')).find(b=>b.getAttribute('onclick')===`renderTradeTab('${cat}')`); if(btn) btn.classList.add('active');
+      const list=document.getElementById('trade-list'); list.innerHTML=''; const full=myFull(); if(!full){ list.innerHTML='<div class="muted" style="padding:12px;">กำลังโหลด...</div>'; return; }
+
+      if(cat==='pets'){
+        for(const p of (full.pets||[])){ if(p.placed) continue;
+          const uid=p.uid; const row=document.createElement('div'); row.className='row';
+          row.innerHTML=`<div class="grow"><div><b>${p.type||'-'}</b> <span class="chip">${p.mutation||'None'}</span></div></div>
+                        <div class="actions"><button class="toggle ${tradeSelection[uid]?'selected':''}" onclick="toggleTrade('${uid}',1)">${tradeSelection[uid]?'ส่ง':'เก็บ'}</button></div>`;
+          list.appendChild(row);
+        }
+      }else if(cat==='eggs'){
+        const map=new Map();
+        for(const e of (full.eggs||[])){ if(e.placed) continue; const k=`${e.type}|${e.mutation||'None'}`; if(!map.has(k)) map.set(k,{type:e.type,muta:e.mutation||'None',uids:[]}); map.get(k).uids.push(e.uid); }
+        const rows=[...map.values()].sort((a,b)=>a.type===b.type? a.muta.localeCompare(b.muta):a.type.localeCompare(b.type));
+        for(const g of rows){ const key=`${g.type}|${g.muta}`; const maxQty=g.uids.length; const sel=tradeSelection[key]||0; const row=document.createElement('div'); row.className='row';
+          row.innerHTML=`<div class="grow"><div><b>${g.type}</b> <span class="chip">${g.muta}</span></div><div class="muted">ในกระเป๋า: ${maxQty}</div></div>
+                        <div class="actions"><input class="qty" type="number" min="0" max="${maxQty}" value="${sel||''}" placeholder="เก็บ" oninput="setGroupQty('${key}', this.value, ${maxQty})" /></div>`;
+          list.appendChild(row);
+        }
+      }else if(cat==='foods'){
+        for(const f of (full.foods||[])){ const have=toInt(f.quantity,0); if(have<=0) continue; const sel=tradeSelection[f.name]||0; const row=document.createElement('div'); row.className='row';
+          row.innerHTML=`<div class="grow"><div><b>${f.name}</b></div><div class="muted">มีอยู่: ${have}</div></div>
+                        <div class="actions"><input class="qty" type="number" min="0" max="${have}" value="${sel||''}" placeholder="เก็บ" oninput="setQty('${f.name}', this.value, ${have})" /></div>`;
+          list.appendChild(row);
+        }
+      }
+    }
+    function toggleTrade(uid,qty){ if(tradeSelection[uid]) delete tradeSelection[uid]; else tradeSelection[uid]=qty; const active=document.querySelector('#trade-tabs .tab.active'); const m=active?.getAttribute('onclick').match(/'([^']+)'/); renderTradeTab(m?m[1]:'pets'); updateTradeSelectionCount(); }
+    function setQty(name,val,max){ let n=parseInt(val,10); if(!Number.isFinite(n)||n<=0){ delete tradeSelection[name]; updateTradeSelectionCount(); return; } if(n>max) n=max; tradeSelection[name]=n; updateTradeSelectionCount(); }
+    function setGroupQty(key,val,max){ let n=parseInt(val,10); if(!Number.isFinite(n)||n<=0){ delete tradeSelection[key]; updateTradeSelectionCount(); return; } if(n>max) n=max; tradeSelection[key]=n; updateTradeSelectionCount(); }
+    function updateTradeSelectionCount(){ let c=0; for(const k in tradeSelection) c+=toInt(tradeSelection[k],0); document.getElementById('send-trade-btn').disabled=(c===0); document.getElementById('trade-selection-count').textContent=`(${c})`; }
+
+    /* ======= ACK helper ======= */
+    async function waitForCommands(cmdIds, {intervalMs=1000, timeoutMs=300000, onTick} = {}){
+      const start = Date.now();
+      const ids = cmdIds.filter(Boolean);
+      while (true) {
+        const res = await fetch('/command_status?ids=' + encodeURIComponent(ids.join(',')));
+        const map = await res.json();
+        if (onTick) try { onTick(map); } catch {}
+        const allDone = ids.every(id => map[id] && ["completed","partial","failed"].includes(map[id].state));
+        if (allDone) return map;
+        if (Date.now() - start > timeoutMs) return map;
+        await new Promise(r => setTimeout(r, intervalMs));
+      }
+    }
+
+    /* ===== TaskCenter ===== */
+    const TaskCenter = {
+      tasks:{},
+      ensureDrawer(){ document.getElementById('task-drawer').classList.remove('hidden'); },
+      hideDrawer(){ if(Object.keys(this.tasks).length===0) document.getElementById('task-drawer').classList.add('hidden'); },
+      add(task){ this.tasks[task.id]=Object.assign({completed:0,success:0,failed:0,state:'queued',createdAt:Date.now()}, task); this.render(); this.ensureDrawer(); },
+      updateFromStatusMap(map){
+        let changed=false;
+        for(const id in map){
+          const st=map[id]; if(!st) continue;
+          const t=this.tasks[id]; if(!t) continue;
+          t.total = st.total ?? t.total;
+          t.completed = st.completed ?? t.completed;
+          t.success = st.success ?? t.success;
+          t.failed = st.failed ?? t.failed;
+          t.state = st.state || t.state;
+          changed=true;
+        }
+        if(changed) this.render();
+      },
+      remove(id){ delete this.tasks[id]; this.render(); this.hideDrawer(); },
+      render(){
+        const box=document.getElementById('task-list'); if(!box) return;
+        const entries=Object.values(this.tasks).sort((a,b)=>a.createdAt-b.createdAt);
+        box.innerHTML='';
+        for(const t of entries){
+          const pct = (t.total>0)? Math.round((t.completed/t.total)*100) : 0;
+          const status = t.state==='completed' ? '✔' : (t.state==='partial' ? '⚠' : (t.state==='failed'?'✖':'…'));
+          const statusCls = t.state==='completed' ? 'status-ok' : (t.state==='partial'?'status-warn': (t.state==='failed'?'status-err':'' ));
+          const card=document.createElement('div'); card.className='task-card';
+          card.innerHTML=`
+            <div class="task-title">
+              <span>${status} ${t.title}</span>
+              <span class="${statusCls}">${t.success||0}/${t.total||0}</span>
+            </div>
+            ${t.subtitle?`<div class="task-sub">${t.subtitle}</div>`:''}
+            <div class="progress"><div class="progress-bar stripes" style="width:${pct}%;"></div></div>
+            <div class="task-sub">
+              <span class="pill">ทำแล้ว ${t.completed||0}</span>
+              <span class="pill">สำเร็จ ${t.success||0}</span>
+              <span class="pill">ล้มเหลว ${t.failed||0}</span>
+            </div>
+          `;
+          box.appendChild(card);
+        }
+      }
+    };
+    document.getElementById('task-min').onclick=()=>{
+      const list=document.getElementById('task-list'); const btn=document.getElementById('task-min');
+      const hidden=list.style.display==='none'; list.style.display= hidden ? '' : 'none'; btn.textContent = hidden ? 'ย่อ' : 'ขยาย';
+    };
+    document.getElementById('task-close').onclick=()=>{
+      TaskCenter.tasks={}; TaskCenter.render(); document.getElementById('task-drawer').classList.add('hidden');
+    };
+    function autoClearTask(id, ms=12000){ setTimeout(()=>{ TaskCenter.remove(id); }, ms); }
+
+    /* ======= FullLoader (speed up) ======= */
+    const FullLoader = (() => {
+      const inflight = new Set();
+      const queued = [];
+      const requestedAt = new Map();
+      const MAX_CONCURRENCY = 6;
+      const MIN_RETRY_GAP = 2500; // ms
+
+      function _hasFresh(name){ return hasFreshFull(playersData[name]); }
+      async function _kick(){
+        while (inflight.size < MAX_CONCURRENCY && queued.length){
+          const name = queued.shift();
+          if (!name) continue;
+          if (inflight.has(name) || _hasFresh(name)) continue;
+          const last = requestedAt.get(name)||0;
+          if (Date.now() - last < MIN_RETRY_GAP) continue;
+
+          inflight.add(name);
+          requestedAt.set(name, Date.now());
+          try { await requestFull(name); } catch {}
+          setTimeout(() => { inflight.delete(name); _kick(); validateDistForm(); }, 600);
+        }
+      }
+      function enqueue(name){
+        if (!name || _hasFresh(name) || inflight.has(name)) return;
+        if (!queued.includes(name)) queued.push(name);
+        _kick();
+      }
+      function enqueueList(list){ (list||[]).forEach(enqueue); }
+      return { enqueue, enqueueList };
+    })();
+
+    /* ======= Distributor ======= */
+    let msSenders=null, msTypes=null, msMutas=null, msFoodsDist=null;
+    let distPlan=null, distFullWatch=null, distFastFetchTimer=null;
+
+    const distEls={
+      modal:document.getElementById('dist-modal'),
+      receiver:document.getElementById('dist-receiver'),
+      qtyEgg:document.getElementById('dist-qty'),
+      qtyFood:document.getElementById('dist-qty-food'),
+      calc:document.getElementById('dist-calc'),
+      send:document.getElementById('dist-send'),
+      tbody:document.getElementById('dist-tbody'),
+      hint:document.getElementById('dist-hint'),
+      colHave:document.getElementById('dist-col-have')
+    };
+
+    document.getElementById('open-distributor-btn').onclick=()=>{ if(!selectedPlayer){ alert('โปรดเลือกผู้เล่นก่อน'); return; } openDistModal(); };
+    function closeDistModal(){
+      distEls.modal.style.display='none';
+      if(distFullWatch){ clearInterval(distFullWatch); distFullWatch=null; }
+      if(distFastFetchTimer){ clearInterval(distFastFetchTimer); distFastFetchTimer=null; }
+    }
+
+    function roomBotCandidates(anchorName){
+      const anchor = anchorName || selectedPlayer;
+      const online = new Set(onlyOnlineNames());
+      const roomList =
+        (playersData[anchor] && playersData[anchor].serverPlayerList) ||
+        (playersData[selectedPlayer] && playersData[selectedPlayer].serverPlayerList) || [];
+      return roomList.filter(n => online.has(n));
+    }
+    function buildTypeMutaUniverse(){ const types=new Set(), mutas=new Set(['None']); Object.values(playersData).forEach(pd=>{ const sl=pd.inventorySlim||{}; (sl.eggsAgg||[]).forEach(e=>{ types.add(e.type); mutas.add(e.muta||'None'); }); }); return {types:[...types].sort(), mutas:[...mutas].sort()}; }
+    function buildFoodUniverse(){ const foods=new Set(); Object.values(playersData).forEach(pd=>{ const sl=getSlim(pd); (sl.foods||[]).forEach(f=>foods.add(f.name)); }); return [...foods].sort(); }
+
+    function markReceiverDisabled(ms, receiver){
+      const box = ms.optionsBox || document.querySelector('#ms-senders .ms-options'); if (!box) return;
+      box.querySelectorAll('.ms-option').forEach(row => {
+        const val = row.dataset.value || ''; const cb  = row.querySelector('input[type="checkbox"]');
+        row.classList.remove('disabled'); if (cb) cb.disabled = false; const lock=row.querySelector('.lock'); if(lock) lock.remove();
+        if (val === receiver) {
+          row.classList.add('disabled'); if (cb) { cb.checked = false; cb.disabled = true; }
+          const tag=document.createElement('span'); tag.className='lock'; tag.textContent='🔒 Receiver'; row.appendChild(tag);
+        }
+      });
+    }
+
+    function getDistMode(){ return document.querySelector('input[name="distMode"]:checked')?.value || 'eggs'; }
+    function switchDistMode(){
+      const m=getDistMode();
+      document.getElementById('dist-eggs-section').style.display = (m==='eggs')? '' : 'none';
+      document.getElementById('dist-foods-section').style.display = (m==='foods')? '' : 'none';
+      distPlan=null; distEls.send.disabled=true; distEls.calc.disabled=true;
+      distEls.tbody.innerHTML = `<tr><td colspan="5" class="muted">เลือกผู้ส่ง + ${m==='eggs'?'Type/Mutation':'Food Items'} และจำนวน แล้วกด “คำนวณ”</td></tr>`;
+      distEls.colHave.textContent = (m==='eggs') ? 'มีไข่ (ตรงเงื่อนไข)' : 'มีของ (ตรงเงื่อนไข)';
+      validateDistForm();
+    }
+
+    async function openDistModal(){
+      const me=playersData[selectedPlayer];
+      distEls.receiver.innerHTML=''; (me?.serverPlayerList||[]).forEach(n=>{ distEls.receiver.innerHTML+=`<option>${n}</option>`; });
+      if(me?.serverPlayerList?.length){ const idx=Math.max(0, me.serverPlayerList.indexOf(selectedPlayer)); const def = me.serverPlayerList[(idx+1)%me.serverPlayerList.length]; distEls.receiver.value = def || me.serverPlayerList[0]; }
+
+      if(!msSenders)   msSenders =new MultiSelect(document.getElementById('ms-senders'),   {placeholder:'เลือกผู้ส่ง',onChange:validateDistForm});
+      if(!msTypes)     msTypes   =new MultiSelect(document.getElementById('ms-types'),     {placeholder:'เลือก Egg Type',onChange:validateDistForm});
+      if(!msMutas)     msMutas   =new MultiSelect(document.getElementById('ms-mutas'),     {placeholder:'เลือก Mutation',onChange:validateDistForm});
+      if(!msFoodsDist) msFoodsDist=new MultiSelect(document.getElementById('ms-foods-dist'),{placeholder:'เลือก Food Items',onChange:validateDistForm});
+
+      const u=buildTypeMutaUniverse(); msTypes.setOptions(u.types); msMutas.setOptions(u.mutas);
+      msFoodsDist.setOptions(buildFoodUniverse());
+
+      distEls.qtyEgg.value=''; distEls.qtyFood.value='';
+      distEls.tbody.innerHTML=`<tr><td colspan="5" class="muted">เลือกผู้ส่ง + โหมด + ตัวเลือก และจำนวน แล้วกด “คำนวณ”</td></tr>`;
+      distPlan=null; distEls.send.disabled=true; distEls.calc.disabled=true; distEls.hint.textContent='';
+
+      const cands = roomBotCandidates(distEls.receiver.value);
+      FullLoader.enqueueList(cands);
+
+      rebuildSenderOptions();
+      distEls.receiver.onchange = rebuildSenderOptions;
+
+      // bind mode switch
+      document.querySelectorAll('input[name="distMode"]').forEach(r=> r.onchange = switchDistMode);
+      switchDistMode();
+
+      distEls.modal.style.display='flex';
+      validateDistForm();
+
+      if(distFullWatch) clearInterval(distFullWatch);
+      distFullWatch = setInterval(()=> validateDistForm(), 1000);
+
+      ensureDistFastFetch();
+    }
+
+    function rebuildSenderOptions(){
+      const receiver = distEls.receiver.value || '';
+      const candidates = roomBotCandidates(receiver);
+
+      const prevSelected = new Set(msSenders ? msSenders.getSelected() : []);
+      msSenders.setOptions(candidates, { preselectAll: false });
+
+      let nextSelected = candidates.filter(v => v !== receiver && prevSelected.has(v));
+      if (nextSelected.length === 0) nextSelected = candidates.filter(v => v !== receiver);
+      msSenders.setSelected(nextSelected);
+
+      markReceiverDisabled(msSenders, receiver);
+
+      document.getElementById('senders-all').onclick = () => { msSenders.setSelected(msSenders.options.filter(v => v !== receiver)); validateDistForm(); ensureDistFastFetch(); };
+      document.getElementById('senders-clear').onclick = () => { msSenders.clear(); validateDistForm(); ensureDistFastFetch(); };
+
+      FullLoader.enqueueList(msSenders.getSelected());
+      validateDistForm();
+      ensureDistFastFetch();
+    }
+
+    function missingSendersNeedingFull(){
+      const senders=msSenders?msSenders.getSelected():[];
+      return senders.filter(s=>!hasFreshFull(playersData[s]));
+    }
+    function ensureDistFastFetch(){
+      const missing = missingSendersNeedingFull();
+      if (distEls.modal.style.display==='flex' && missing.length>0){
+        if(!distFastFetchTimer){
+          distFastFetchTimer = setInterval(updateDashboard, 1200);
+        }
+      }else{
+        if(distFastFetchTimer){ clearInterval(distFastFetchTimer); distFastFetchTimer=null; }
+      }
+    }
+
+    function validateDistForm(){
+      const senders=msSenders?msSenders.getSelected():[]; 
+      const okSenders=senders.length>0;
+      const mode=getDistMode();
+
+      let okChoice=false, okQty=false;
+      if(mode==='eggs'){
+        okChoice=(msTypes && msTypes.getSelected().length>0) && (msMutas && msMutas.getSelected().length>0);
+        const q=parseInt(distEls.qtyEgg.value,10); okQty=Number.isFinite(q)&&q>0;
+      }else{
+        okChoice=(msFoodsDist && msFoodsDist.getSelected().length>0);
+        const q=parseInt(distEls.qtyFood.value,10); okQty=Number.isFinite(q)&&q>0;
+      }
+
+      FullLoader.enqueueList(senders);
+
+      const missingFull = senders.filter(s=>!hasFreshFull(playersData[s]));
+      distEls.hint.textContent = missingFull.length? `กำลังโหลดข้อมูลเต็มของผู้ส่ง: ${missingFull.join(', ')}` : '';
+      distEls.calc.disabled = !(okSenders && okChoice && okQty && missingFull.length===0);
+      distEls.send.disabled = !distPlan;
+
+      ensureDistFastFetch();
+    }
+    distEls.qtyEgg.oninput=()=>{ validateDistForm(); ensureDistFastFetch(); };
+    distEls.qtyFood.oninput=()=>{ validateDistForm(); ensureDistFastFetch(); };
+    document.getElementById('types-all').onclick=()=>{ msTypes.selectAll(); validateDistForm(); };
+    document.getElementById('types-clear').onclick=()=>{ msTypes.clear(); validateDistForm(); };
+    document.getElementById('mutas-all').onclick=()=>{ msMutas.selectAll(); validateDistForm(); };
+    document.getElementById('mutas-clear').onclick=()=>{ msMutas.clear(); validateDistForm(); };
+    document.getElementById('foods-all').onclick=()=>{ msFoodsDist.selectAll(); validateDistForm(); };
+    document.getElementById('foods-clear').onclick=()=>{ msFoodsDist.clear(); validateDistForm(); };
+
+    // ===== คำนวณ (Eggs / Foods) =====
+    distEls.calc.onclick=()=>{
+      const receiver=distEls.receiver.value?.trim();
+      const senders=msSenders.getSelected().filter(n=>n!==receiver);
+      const tb=distEls.tbody; tb.innerHTML=''; distPlan=null;
+
+      const mode=getDistMode();
+      const bucket=[]; // per-sender state
+      let totalHave=0;
+
+      if(mode==='eggs'){
+        const types=new Set(msTypes.getSelected());
+        const mutas=new Set(msMutas.getSelected());
+        const want=parseInt(distEls.qtyEgg.value,10);
+
+        for(const s of senders){
+          const pd=playersData[s]; const full=pd?.inventory; if(!full) continue;
+          const uids=[];
+          for(const e of (full.eggs||[])){
+            if(e.placed) continue;
+            if(types.has(e.type) && mutas.has(e.mutation||'None')) uids.push(e.uid);
+          }
+          const sent=toInt(pd?.todayGiftCount,0);
+          const remaining=Math.max(0,DAILY_LIMIT-sent);
+          if(uids.length>0 && remaining>0){ bucket.push({name:s,uids, sentToday:sent, remaining, willSend:0}); totalHave+=uids.length; }
+        }
+        if(bucket.length===0){ tb.innerHTML=`<tr><td colspan="5">ไม่มีผู้ส่งที่เลือกมีไข่ตามเงื่อนไข หรือเต็มโควตาแล้ว</td></tr>`; validateDistForm(); return; }
+        if(totalHave===0){ tb.innerHTML=`<tr><td colspan="5">ไม่มีไข่ตามเงื่อนไขในกระเป๋าของผู้ส่งที่เลือก</td></tr>`; validateDistForm(); return; }
+
+        let need=want;
+        bucket.sort((a,b)=>(b.remaining-a.remaining)||(b.uids.length-a.uids.length));
+        while(need>0){
+          let progressed=false;
+          for(const b of bucket){
+            if(need<=0) break;
+            if(b.remaining>0 && b.willSend<b.uids.length){
+              b.willSend++; b.remaining--; need--; progressed=true;
+            }
+          }
+          if(!progressed) break;
+        }
+
+        for(const b of bucket){
+          const tr=document.createElement('tr');
+          tr.innerHTML=`<td>${b.name}</td><td>${b.uids.length}</td><td>${b.sentToday} / ${DAILY_LIMIT}</td><td>${Math.max(0,DAILY_LIMIT-b.sentToday)}</td><td class="right"><b>${b.willSend}</b></td>`;
+          tb.appendChild(tr);
+        }
+        const totalWill=bucket.reduce((s,b)=>s+b.willSend,0);
+        if(totalWill<want){ const warn=document.createElement('tr'); warn.innerHTML=`<td colspan="5" class="muted">สามารถส่งได้เพียง ${totalWill} จากที่ต้องการ ${want}</td>`; tb.appendChild(warn); }
+
+        const plan={receiver, pairs:[]};
+        for(const b of bucket){ if(b.willSend>0) plan.pairs.push({sender:b.name, uids:b.uids.slice(0,b.willSend)}); }
+        distPlan=plan; distEls.send.disabled=plan.pairs.length===0;
+
+      }else{ // FOODS
+        const foodsSel = new Set(msFoodsDist.getSelected());
+        const wantPerKind = parseInt(distEls.qtyFood.value,10);
+
+        for(const s of senders){
+          const pd=playersData[s]; const full=pd?.inventory; if(!full) continue;
+          const stock = {}; let haveSum=0;
+          for(const f of (full.foods||[])){
+            const qty=toInt(f.quantity,0);
+            if(qty>0 && foodsSel.has(f.name)){ stock[f.name]=qty; haveSum += qty; }
+          }
+          const sent=toInt(pd?.todayGiftCount,0);
+          const remaining=Math.max(0,DAILY_LIMIT-sent);
+          if(haveSum>0 && remaining>0){ bucket.push({name:s, stock, sentToday:sent, remaining, plan:{}, willSend:0}); totalHave+=haveSum; }
+        }
+        if(bucket.length===0){ tb.innerHTML=`<tr><td colspan="5">ไม่มีผู้ส่งที่เลือกมีผลไม้ตามเงื่อนไข หรือเต็มโควตาแล้ว</td></tr>`; validateDistForm(); return; }
+
+        // จัดสรรต่อชนิด
+        for(const fname of foodsSel){
+          let need = wantPerKind;
+          while(need>0){
+            let progressed=false;
+            for(const b of bucket){
+              const have=toInt(b.stock[fname],0);
+              const sentForThis = toInt(b.plan[fname],0);
+              if(b.remaining>0 && have>sentForThis){
+                b.plan[fname] = sentForThis+1;
+                b.remaining--; b.willSend++; need--; progressed=true;
+                if(need<=0) break;
+              }
+            }
+            if(!progressed) break;
+          }
+        }
+
+        // แสดงผล + แปลงแผนเป็น uids (ชื่ออาหารซ้ำตามจำนวน)
+        for(const b of bucket){
+          const haveSum = Object.entries(b.stock).reduce((s,[k,v])=>s+toInt(v,0),0);
+          const willPairs = Object.entries(b.plan).filter(([k,v])=>toInt(v,0)>0);
+          const chips = willPairs.map(([k,v])=>`<span class="chip">${k} × ${v}</span>`).join(' ');
+          const tr=document.createElement('tr');
+          tr.innerHTML=`<td>${b.name}</td><td>${haveSum}</td><td>${b.sentToday} / ${DAILY_LIMIT}</td><td>${Math.max(0,DAILY_LIMIT-b.sentToday)}</td><td class="right"><b>${b.willSend}</b>${chips?`<div style="margin-top:4px">${chips}</div>`:''}</td>`;
+          tb.appendChild(tr);
+        }
+
+        const plan={receiver, pairs:[]};
+        for(const b of bucket){
+          const tokens=[];
+          for(const [fname,qty] of Object.entries(b.plan)){ const q=toInt(qty,0); for(let i=0;i<q;i++) tokens.push(fname); }
+          if(tokens.length>0) plan.pairs.push({sender:b.name, uids:tokens});
+        }
+        distPlan=plan; distEls.send.disabled=plan.pairs.length===0;
+      }
+    };
+
+    /* ======= Distributor: ส่งจริง + Progress ======= */
+    distEls.send.onclick=async()=>{
+      if(!distPlan) return;
+      const {receiver,pairs}=distPlan; 
+      if (!pairs.length) { alert('ไม่มีรายการส่ง'); return; }
+
+      const rowMap = {};
+      for (const tr of distEls.tbody.querySelectorAll('tr')) {
+        const nameCell = tr.children && tr.children[0];
+        if (nameCell) rowMap[nameCell.textContent.trim()] = tr;
+      }
+
+      const cmdIds = [];
+      const senderToCmd = {};
+
+      for (const p of pairs) {
+        const r = await fetch('/command', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ playerName:p.sender, action:'send_items', target:receiver, uids:p.uids })
+        });
+        const j = await r.json();
+        if (!j.commandId) continue;
+        cmdIds.push(j.commandId);
+        senderToCmd[p.sender] = j.commandId;
+
+        TaskCenter.add({
+          id: j.commandId,
+          title: `Dist: ${p.sender} → ${receiver}`,
+          subtitle: `${p.uids.length} ชิ้น`,
+          total: p.uids.length
+        });
+
+        const tr = rowMap[p.sender];
+        if (tr) {
+          const last = tr.lastElementChild;
+          if (last) {
+            last.innerHTML = `
+              <div class="right"><b>${p.uids.length}</b></div>
+              <div class="progress" style="margin-top:6px;"><div class="progress-bar stripes" style="width:0%"></div></div>
+            `;
+          }
+        }
+      }
+      if (!cmdIds.length) { alert('คิวคำสั่งไม่สำเร็จ'); return; }
+
+      distEls.send.disabled = true;
+      distEls.hint.textContent = 'กำลังส่ง... (กำลังรอผลจริง)';
+
+      const statusMap = await waitForCommands(cmdIds, {
+        onTick: (m) => {
+          TaskCenter.updateFromStatusMap(m);
+          for (const sender in senderToCmd) {
+            const id = senderToCmd[sender];
+            const st = m[id]; if (!st) continue;
+            const tr = rowMap[sender]; if (!tr) continue;
+            const bar = tr.querySelector('.progress-bar');
+            if (bar && st.total>0) {
+              bar.style.width = Math.round((st.completed/st.total)*100) + '%';
+            }
+          }
+        }
+      });
+
+      let total = 0, ok = 0, fail = 0;
+      for (const id of cmdIds) {
+        const st = statusMap[id];
+        if (!st) continue;
+        total += st.total || 0;
+        ok    += st.success || 0;
+        fail  += st.failed  || 0;
+      }
+      distEls.send.disabled = false;
+      distEls.hint.textContent = '';
+
+      for (const id of cmdIds) autoClearTask(id, fail?18000:12000);
+
+      if (fail === 0 && ok === total) {
+        alert(`ส่งครบเรียบร้อย ✅ (${ok}/${total})`);
+      } else if (ok > 0) {
+        alert(`ส่งได้บางส่วน ❗ (${ok}/${total}) ล้มเหลว ${fail}`);
+      } else {
+        alert('การส่งล้มเหลวหรือหมดเวลา ⛔');
+      }
+      closeDistModal();
+    };
+
+    /* ======= Fetch Loop & Buttons ======= */
+    function refreshButtons(){ 
+      const my=selectedPlayer?playersData[selectedPlayer]:null; 
+      const can=!!(my && isOnline(my) && my.serverPlayerList && my.serverPlayerList.length>1); 
+      document.getElementById('open-trade-btn').disabled=!can; 
+    }
+    function renderAll(){ renderPlayerList(); renderCenter(); renderInspector(); refreshButtons(); }
+
+    async function updateDashboard(){ 
+      try{ 
+        const r=await fetch('/get_data'); 
+        const incoming=await r.json(); 
+        const now=nowSec();
+        for(const name of Object.keys(incoming)){
+          const pd=incoming[name];
+          if(pd && (pd.mode==='full' || pd.inventory)) { pd.fullTS = now; } 
+          else if(playersData[name] && playersData[name].inventory && playersData[name].fullTS && (now - playersData[name].fullTS <= 25)){
+            incoming[name].inventory = playersData[name].inventory;
+            incoming[name].fullTS    = playersData[name].fullTS;
+          }
+        }
+        playersData=incoming; 
+        renderAll(); 
+        ensureDistFastFetch();
+      }catch(e){ console.error(e); } 
+    }
+
+    setInterval(updateDashboard, 2000); 
+    updateDashboard();
+  </script>
+</body>
+</html>
