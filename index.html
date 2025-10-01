@@ -47,12 +47,17 @@
     .player-card{ padding:10px 12px; margin:8px 0; border-radius:8px; border:1px solid var(--border); cursor:pointer; background:#3a5066; transition:.15s; }
     .player-card:hover{ transform:translateY(-1px); box-shadow:0 4px 10px rgba(0,0,0,.15) }
     .player-card.active{ outline:2px solid var(--primary); box-shadow:0 0 0 2px rgba(52,152,219,.3) inset }
+    .player-card.other{ cursor:default; opacity:.78; background:#33475f; }
+    .player-card.other:hover{ transform:none; box-shadow:none; }
     .player-name{ font-weight:700; display:flex; align-items:center; gap:8px; }
     .online-badge{ font-size:11px; font-weight:700; letter-spacing:.2px; padding:2px 6px; border-radius:999px; background:rgba(39,174,96,.15); color:#b6f3c8; border:1px solid rgba(39,174,96,.35); }
+    .online-badge.other{ background:rgba(149,165,166,.18); border-color:rgba(149,165,166,.45); color:#e4ebf5; }
     .player-sub{ margin-top:6px; font-size:12px; color:#d6e2ee; display:flex; flex-direction:column; gap:4px; }
-    .coin-line,.limit-line{ display:flex; align-items:center; gap:6px; color:#e3eef9; }
+    .coin-line,.limit-line,.income-line{ display:flex; align-items:center; gap:6px; color:#e3eef9; }
     .coin-line::before{ content:"💰"; opacity:.9 }
     .limit-line::before{ content:"🎁"; opacity:.9 }
+    .income-line::before{ content:"🌾"; opacity:.9 }
+    .income-line{ white-space:pre-line; }
 
     .chip{ display:inline-flex; align-items:center; gap:6px; padding:2px 8px; border-radius:999px; background:#223445; border:1px solid #3c556e; font-size:12px; }
     .summary-line{ display:flex; align-items:flex-start; gap:6px; flex-wrap:wrap; margin-top:6px; }
@@ -373,6 +378,7 @@
     let selectedPlayer = null;
     let expandedRooms = new Set();
     let roomsAutoExpanded = new Set();
+    let latestRooms = [];
     const DAILY_LIMIT = 500;
 
     let msSideEggTypes=null, msSideMutas=null, msSideFoods=null;
@@ -381,7 +387,20 @@
 
     const nowSec = ()=>Math.floor(Date.now()/1000);
     const toInt = (v,d=0)=>{ const n=Number(v); return Number.isFinite(n)?n:d; };
+    const escapeHtml = (s)=> String(s ?? '').replace(/[&<>"']/g, c=>({
+      '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'
+    })[c] || c);
     const coinsStr = (pd)=> toInt(pd?.coin,0).toLocaleString();
+    const farmIncomeDisplay = (pd)=>{
+      const value = Number(pd?.farmIncomePerSec);
+      if(!Number.isFinite(value) || value <= 0) return '';
+      let formatOptions;
+      if (value >= 100) formatOptions = { maximumFractionDigits: 0 };
+      else if (value >= 10) formatOptions = { maximumFractionDigits: 1 };
+      else formatOptions = { maximumFractionDigits: 2 };
+      const formatted = value.toLocaleString(undefined, formatOptions);
+      return `${formatted} /s`;
+    };
 
     const isOnline = (pd)=>{
       if(!pd || !pd.serverLastSeen) return false;
@@ -470,18 +489,66 @@
 
     /* ======= Group by Room ======= */
     function groupByRoom(){
-      const names=onlyOnlineNames(); const groups=new Map();
+      const names = onlyOnlineNames();
+      if(names.length === 0){ latestRooms = []; return []; }
+
+      const nameSet = new Set(names);
+      const visited = new Set();
+      const rooms = [];
+
       for(const name of names){
-        const serverList=playersData[name]?.serverPlayerList||[];
-        const inRoom=serverList.filter(n=>names.includes(n));
-        if(!inRoom.includes(name)) inRoom.push(name);
-        const key=JSON.stringify(inRoom.sort());
-        if(!groups.has(key)) groups.set(key,{members:[]});
-        groups.get(key).members.push(name);
+        if(visited.has(name)) continue;
+
+        const stack = [name];
+        const memberSet = new Set();
+        const othersSet = new Set();
+
+        while(stack.length){
+          const current = stack.pop();
+          if(visited.has(current)) continue;
+
+          visited.add(current);
+          memberSet.add(current);
+
+          const serverList = playersData[current]?.serverPlayerList || [];
+          for(const raw of serverList){
+            if(raw == null) continue;
+            const otherName = typeof raw === 'string' ? raw.trim() : String(raw).trim();
+            if(!otherName) continue;
+
+            if(nameSet.has(otherName)){
+              if(!visited.has(otherName)) stack.push(otherName);
+            }else{
+              othersSet.add(otherName);
+            }
+          }
+        }
+
+        const members = Array.from(memberSet).sort((a,b)=>a.localeCompare(b));
+        const others = Array.from(othersSet).sort((a,b)=>a.localeCompare(b));
+        const signature = JSON.stringify({members, others});
+        rooms.push({ roomId: hashShort(signature), members, others });
       }
-      return Array.from(groups.entries())
-        .map(([k,v])=>({roomKey:k, roomId:hashShort(k), members:v.members.sort()}))
-        .sort((a,b)=>b.members.length-a.members.length);
+
+      rooms.sort((a,b)=>{
+        const totalA = a.members.length + a.others.length;
+        const totalB = b.members.length + b.others.length;
+        if(totalB !== totalA) return totalB - totalA;
+        if(b.members.length !== a.members.length) return b.members.length - a.members.length;
+        return a.roomId.localeCompare(b.roomId);
+      });
+
+      latestRooms = rooms;
+      return rooms;
+    }
+
+    function getRoomInfo(name){
+      if(!name) return null;
+      if(!latestRooms.some(r=>r.members.includes(name))){
+        const rooms = groupByRoom();
+        if(!rooms.length) return null;
+      }
+      return latestRooms.find(r=>r.members.includes(name)) || null;
     }
 
     /* ======= Aggregate helpers ======= */
@@ -516,8 +583,10 @@
       if(groups.length===0){ wrap.innerHTML=`<div class="muted" style="padding:6px 8px;">ไม่มีผู้ใช้สคริปต์ที่ออนไลน์</div>`; return; }
 
       for(const g of groups){
-        const roomMembers=[...new Set(JSON.parse(g.roomKey))];
+        const roomMembers=g.members;
+        const roomOthers=g.others;
         const roomId=g.roomId;
+        const totalPlayers=roomMembers.length+roomOthers.length;
 
         // auto-expand ครั้งเดียวต่อห้อง
         if (selectedPlayer && roomMembers.includes(selectedPlayer) && !expandedRooms.has(roomId) && !roomsAutoExpanded.has(roomId)) {
@@ -531,7 +600,8 @@
         const header=document.createElement('div');
         const open=expandedRooms.has(roomId);
         header.className='room-header clickable';
-        header.innerHTML=`<span class="caret ${open?'open':''}">▸</span> Room <span class="room-pill">${roomId}</span> • ${roomMembers.length} players`;
+        header.innerHTML=`<span class="caret ${open?'open':''}">▸</span> Room <span class="room-pill">${roomId}</span> • ${totalPlayers} players${roomOthers.length?` <span class="muted">(Other ${roomOthers.length})</span>`:''}`;
+        header.title = `Script: ${roomMembers.length}${roomOthers.length?`, Other: ${roomOthers.length}`:''}`;
         header.onclick=()=>{ if(expandedRooms.has(roomId)) expandedRooms.delete(roomId); else expandedRooms.add(roomId); renderPlayerList(); };
         section.appendChild(header);
 
@@ -543,21 +613,31 @@
 
         const details=document.createElement('div'); details.className='room-details'; details.style.display=open?'':'none';
         if(open){
-          const onlineSet=new Set(onlyOnlineNames());
-          const members=roomMembers.filter(n=>onlineSet.has(n)).sort();
-          for(const name of members){
+          for(const name of roomMembers){
             const d=playersData[name]; const sl=getSlim(d);
             const eggList=(sl.eggsAgg||[]).filter(x=>passesEggVisibility(x.type,x.muta));
             const foodList=(sl.foods||[]).filter(x=>passesFoodVisibility(x.name));
             const card=document.createElement('div'); card.className='player-card'+(name===selectedPlayer?' active':'');
-            card.innerHTML=`<div class="player-name"><span>${name}</span><span class="online-badge">ONLINE</span></div>
+            const farmIncomeText = farmIncomeDisplay(d);
+            card.innerHTML=`<div class="player-name"><span>${escapeHtml(name)}</span><span class="online-badge">ONLINE</span></div>
               <div class="player-sub">
                 <div class="coin-line">${coinsStr(d)}</div>
                 <div class="limit-line">${toInt(d?.todayGiftCount,0)} / ${DAILY_LIMIT}</div>
+                ${farmIncomeText?`<div class="income-line">${escapeHtml(farmIncomeText)}</div>`:''}
                 ${eggList.length?`<div class="summary-line"><span class="label">🥚</span>${eggList.slice(0,6).map(g=>`<span class="chip">${g.type}/${g.muta} × ${g.count}</span>`).join(' ')}${eggList.length>6?`<span class="chip">+${eggList.length-6}</span>`:''}</div>`:''}
                 ${foodList.length?`<div class="summary-line"><span class="label">🍓</span>${foodList.slice(0,6).map(f=>`<span class="chip">${f.name} × ${f.qty}</span>`).join(' ')}${foodList.length>6?`<span class="chip">+${foodList.length-6}</span>`:''}</div>`:''}
               </div>`;
             card.onclick=(e)=>{ selectedPlayer = (selectedPlayer===name)? null : name; renderAll(); e.stopPropagation(); };
+            details.appendChild(card);
+          }
+
+          for(const otherName of roomOthers){
+            const card=document.createElement('div'); card.className='player-card other';
+            card.innerHTML=`<div class="player-name"><span>${escapeHtml(otherName)} <span class="muted">(Other)</span></span><span class="online-badge other">OTHER</span></div>
+              <div class="player-sub muted">
+                <div>ไม่ใช้สคริปต์ • ไม่มีข้อมูลเพิ่มเติม</div>
+              </div>`;
+            card.onclick=(e)=>e.stopPropagation();
             details.appendChild(card);
           }
         }
@@ -568,11 +648,6 @@
     }
 
     /* ======= Center Overview ======= */
-    function roomNamesOfSelected(){
-      if(!selectedPlayer || !playersData[selectedPlayer]) return [];
-      const online=new Set(onlyOnlineNames()); const room=playersData[selectedPlayer]?.serverPlayerList||[];
-      return room.filter(n=>online.has(n));
-    }
     function renderCenter(){
       const title=document.getElementById('sel-title'), sub=document.getElementById('sel-sub'), metrics=document.getElementById('sel-metrics');
       const roomSub=document.getElementById('room-sub'), roomEggs=document.getElementById('room-eggs'), roomFoods=document.getElementById('room-foods');
@@ -584,13 +659,28 @@
 
       const me=playersData[selectedPlayer]; const sl=getSlim(me);
       title.textContent=`Selected: ${selectedPlayer}`; sub.textContent='เปิด Trade System หรือ Egg Distributor ได้จากปุ่มด้านขวา';
-      metrics.innerHTML=`<div class="metric"><div class="k">Coins</div><div class="v">${coinsStr(me)}</div></div>
-        <div class="metric"><div class="k">ส่งของวันนี้</div><div class="v">${toInt(me?.todayGiftCount,0)} / ${DAILY_LIMIT}</div></div>
-        <div class="metric"><div class="k">ไข่ที่ยังไม่วาง</div><div class="v">${toInt(sl?.eggsUnplaced,0)}</div></div>
-        <div class="metric"><div class="k">สัตว์ (ยังไม่วาง)</div><div class="v">${toInt(sl?.petsUnplaced,0)}</div></div>`;
+      const metricBlocks = [
+        `<div class="metric"><div class="k">Coins</div><div class="v">${coinsStr(me)}</div></div>`,
+        `<div class="metric"><div class="k">ส่งของวันนี้</div><div class="v">${toInt(me?.todayGiftCount,0)} / ${DAILY_LIMIT}</div></div>`,
+        `<div class="metric"><div class="k">ไข่ที่ยังไม่วาง</div><div class="v">${toInt(sl?.eggsUnplaced,0)}</div></div>`,
+        `<div class="metric"><div class="k">สัตว์ (ยังไม่วาง)</div><div class="v">${toInt(sl?.petsUnplaced,0)}</div></div>`
+      ];
+      const farmIncomeText = farmIncomeDisplay(me);
+      metricBlocks.push(`<div class="metric"><div class="k">รายได้ฟาร์ม</div><div class="v">${farmIncomeText?escapeHtml(farmIncomeText):'-'}</div></div>`);
+      metrics.innerHTML = metricBlocks.join('');
 
-      const rnames=roomNamesOfSelected(); const roomId=hashShort(JSON.stringify(rnames.slice().sort()));
-      roomSub.textContent=rnames.length?`Room ${roomId} • ${rnames.length} players`:'ไม่พบรายชื่อผู้เล่นในห้อง';
+      const roomInfo = getRoomInfo(selectedPlayer);
+      if(!roomInfo){
+        roomSub.textContent='ไม่พบรายชื่อผู้เล่นในห้อง';
+        roomEggs.innerHTML='<span class="muted">—</span>';
+        roomFoods.innerHTML='<span class="muted">—</span>';
+        return;
+      }
+
+      const rnames = roomInfo.members.slice();
+      const totalPlayers = rnames.length + roomInfo.others.length;
+      const otherPart = roomInfo.others.length ? ` (${rnames.length} script, ${roomInfo.others.length} other)` : '';
+      roomSub.textContent = `Room ${roomInfo.roomId} • ${totalPlayers} players${otherPart}`;
 
       const eggMap=new Map(), foodMap=new Map();
       for(const n of rnames){
