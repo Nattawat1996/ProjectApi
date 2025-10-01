@@ -675,6 +675,7 @@
         roomFoods.innerHTML='<span class="muted">—</span>';
         return;
       }
+
       const rnames = roomInfo.members.slice();
       const totalPlayers = rnames.length + roomInfo.others.length;
       const otherPart = roomInfo.others.length ? ` (${rnames.length} script, ${roomInfo.others.length} other)` : '';

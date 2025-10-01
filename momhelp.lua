@@ -19,6 +19,11 @@ local config = {
     ackTimeout     = 3.0,     -- วินาที: รอผลแต่ละชิ้น
 }
 
+-- สถานะภายในสำหรับงาน Hatch Ready
+local mustSendFull = true
+local activeHatchJob = nil
+local lastHatchReadySummary = nil
+
 
 -- =======================
 -- 2) GAME REFERENCES
@@ -132,6 +137,7 @@ local function hasPetUID(uid)
 end
 
 local function postReportChunk(commandId, chunkResults)
+    if not commandId then return false end
     local payload = json.encode({
         playerName = Player.Name,
         commandId  = commandId,
@@ -148,6 +154,87 @@ local function postReportChunk(commandId, chunkResults)
     if not ok then
         warn("[report] ส่งผลลัพธ์ไม่สำเร็จ:", tostring(err))
     end
+    return ok
+end
+
+local function updateHatchReadySummary(job, stateOverride)
+    if not job then return end
+    local state = stateOverride
+    if not state then
+        if job.processed >= job.total then
+            if job.failed == 0 then
+                state = "completed"
+            elseif job.success == 0 then
+                state = "failed"
+            else
+                state = "partial"
+            end
+        else
+            state = "running"
+        end
+    end
+
+    lastHatchReadySummary = {
+        commandId = job.commandId,
+        total = job.total,
+        processed = job.processed,
+        success = job.success,
+        failed = job.failed,
+        state = state,
+        message = job.lastMessage,
+        updatedAt = nowSec(),
+    }
+end
+
+local function flushHatchResults(job, force)
+    if not job then return end
+    if not job.pending or #job.pending == 0 then return end
+    if not force then
+        local shouldFlush = false
+        if job.batchSize and #job.pending >= job.batchSize then
+            shouldFlush = true
+        elseif job.flushInterval and job.lastFlush and (tick() - job.lastFlush) >= job.flushInterval then
+            shouldFlush = true
+        end
+        if not shouldFlush then return end
+    end
+
+    local sent = true
+    if job.commandId then
+        sent = postReportChunk(job.commandId, job.pending)
+    end
+    if sent then
+        job.pending = {}
+        job.lastFlush = tick()
+    end
+    return sent
+end
+
+local function pushHatchResult(job, uid, ok, reason, stateOverride)
+    if not job then return end
+    job.processed += 1
+    if ok then
+        job.success += 1
+    else
+        job.failed += 1
+        if reason and reason ~= "" then
+            job.lastMessage = reason
+        end
+    end
+
+    table.insert(job.pending, { uid = uid, ok = ok, reason = ok and nil or reason })
+    flushHatchResults(job, false)
+    updateHatchReadySummary(job, stateOverride)
+end
+
+local function failRemaining(job, startIndex, reason, stateOverride)
+    if not job then return end
+    local msg = reason or "cancelled"
+    for idx = startIndex, job.total do
+        local uid = job.queue[idx]
+        pushHatchResult(job, uid, false, msg, stateOverride)
+    end
+    flushHatchResults(job, true)
 end
 -- =======================
 -- 4) COMMAND EXECUTORS
@@ -232,29 +319,122 @@ local function executeHatchReadyCommand(command)
             if commandId then
                 postReportChunk(commandId, { { uid = "", ok = false, reason = "no_ready" } })
             end
+            lastHatchReadySummary = {
+                commandId = commandId,
+                total = 0,
+                processed = 0,
+                success = 0,
+                failed = 0,
+                state = "empty",
+                message = "no_ready",
+                updatedAt = nowSec(),
+            }
+
             print("[HatchReady] ไม่มีไข่ที่พร้อมฟัก")
             return
         end
+        local deduped = {}
+        local seen = {}
+        for _, uid in ipairs(readyUIDs) do
+            if type(uid) == "string" and uid ~= "" and not seen[uid] then
+                table.insert(deduped, uid)
+                seen[uid] = true
+            end
+        end
+        readyUIDs = deduped
 
-        print(string.format("[HatchReady] พบไข่พร้อมฟัก %d ใบ", #readyUIDs))
-        local batch = {}
-        local function flush()
-            if commandId and #batch > 0 then
-                postReportChunk(commandId, batch)
-                batch = {}
-            else
-                batch = {}
+        if #readyUIDs == 0 then
+            if commandId then
+                postReportChunk(commandId, { { uid = "", ok = false, reason = "invalid_uids" } })
+            end
+            lastHatchReadySummary = {
+                commandId = commandId,
+                total = 0,
+                processed = 0,
+                success = 0,
+                failed = 0,
+                state = "empty",
+                message = "invalid_uids",
+                updatedAt = nowSec(),
+            }
+            print("[HatchReady] ไม่มี UID ที่พร้อมฟักหลังจากตรวจสอบข้อมูล")
+            return
+        end
+
+        if activeHatchJob then
+            activeHatchJob.cancelRequested = true
+            activeHatchJob.lastMessage = "superseded"
+        end
+
+        local job = {
+            commandId = commandId,
+            queue = readyUIDs,
+            total = #readyUIDs,
+            processed = 0,
+            success = 0,
+            failed = 0,
+            pending = {},
+            batchSize = 10,
+            flushInterval = 1.0,
+            lastFlush = tick(),
+            cancelRequested = false,
+            lastMessage = nil,
+        }
+        activeHatchJob = job
+
+        print(string.format("[HatchReady] เริ่มงานฟักไข่ %d ใบ", job.total))
+        updateHatchReadySummary(job, "starting")
+
+        local ok, err = pcall(function()
+            for idx = 1, job.total do
+                if job.cancelRequested then
+                    print("[HatchReady] ยกเลิกงานฟักไข่ตามคำสั่งใหม่")
+                    failRemaining(job, idx, "cancelled", "cancelled")
+                    return
+                end
+
+                local uid = job.queue[idx]
+                local okHatch, reason = hatchEgg(uid)
+                pushHatchResult(job, uid, okHatch, okHatch and nil or reason)
+                task.wait(0.3)
+            end
+        end)
+
+        if not ok then
+            local errMsg = tostring(err)
+            warn(string.format("[HatchReady] งานฟักไข่ล้มเหลว: %s", errMsg))
+            job.lastMessage = errMsg
+            failRemaining(job, job.processed + 1, errMsg, "error")
+        end
+
+        flushHatchResults(job, true)
+        if job.commandId and job.pending and #job.pending > 0 then
+            for _ = 1, 5 do
+                if #job.pending == 0 then break end
+                task.wait(1.5)
+                local sent = flushHatchResults(job, true)
+                if sent and (#job.pending == 0) then break end
             end
         end
 
-        for _, uid in ipairs(readyUIDs) do
-            local ok, reason = hatchEgg(uid)
-            table.insert(batch, { uid = uid, ok = ok, reason = ok and nil or reason })
-            if #batch >= 5 then flush() end
+        local finalState
+        if job.cancelRequested then
+            finalState = "cancelled"
+        elseif job.failed == 0 then
+            finalState = "completed"
+        elseif job.success == 0 then
+            finalState = "failed"
+        else
+            finalState = "partial"
         end
-        flush()
+        print(string.format("[HatchReady] งานจบด้วยสถานะ %s (สำเร็จ %d / ล้มเหลว %d จาก %d)", finalState, job.success, job.failed, job.total))
+        updateHatchReadySummary(job, finalState)
 
         mustSendFull = true
+        if activeHatchJob == job then
+            activeHatchJob = nil
+        end
+
     end)
 end
 
@@ -431,10 +611,6 @@ local function buildSlimFromFull(inv)
     return slim
 end
 
--- =======================
--- 6) MAIN LOOP (Slim/Full + Commands)
--- =======================
-local mustSendFull = true
 local lastFullAt   = 0
 
 local function processCommands(commands)
@@ -503,6 +679,7 @@ local function sendDataAndCheckCommands()
         coin             = coin,
         todayGiftCount   = getTodayGiftCount(),
         farmIncomePerSec = getTotalFarmIncomePerSecond(),
+        hatchReadyJob    = lastHatchReadySummary,
         updateInterval   = config.updateInterval,
         serverPlayerList = getAllPlayersInServer(),
         inventorySlim    = slim,         -- ส่ง Slim ทุกครั้ง
