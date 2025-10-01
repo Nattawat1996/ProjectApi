@@ -329,10 +329,10 @@ local function executeHatchReadyCommand(command)
                 message = "no_ready",
                 updatedAt = nowSec(),
             }
+
             print("[HatchReady] ไม่มีไข่ที่พร้อมฟัก")
             return
         end
-
         local deduped = {}
         local seen = {}
         for _, uid in ipairs(readyUIDs) do
@@ -434,6 +434,7 @@ local function executeHatchReadyCommand(command)
         if activeHatchJob == job then
             activeHatchJob = nil
         end
+
     end)
 end
 
