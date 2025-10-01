@@ -19,6 +19,11 @@ local config = {
     ackTimeout     = 3.0,     -- วินาที: รอผลแต่ละชิ้น
 }
 
+-- สถานะภายในสำหรับงาน Hatch Ready
+local mustSendFull = true
+local activeHatchJob = nil
+local lastHatchReadySummary = nil
+
 
 -- =======================
 -- 2) GAME REFERENCES
@@ -43,6 +48,8 @@ local CharacterRE  = GameRemoteEvents:WaitForChild("CharacterRE", 30)
 -- Mutation list with "None"
 local Mutations_With_None = {"None"}
 for _, m in ipairs(Mutations_InGame) do table.insert(Mutations_With_None, m) end
+
+local getServerTimeObj
 
 -- =======================
 -- 3) HELPERS
@@ -94,6 +101,25 @@ local function getFoodQty(name)
     return tonumber(all[name]) or 0
 end
 
+local function getTotalFarmIncomePerSecond()
+    local total = 0
+    for _, petModel in ipairs(PetsFolder:GetChildren()) do
+        if petModel:GetAttribute("UserId") == Player.UserId then
+            local root = petModel.PrimaryPart or petModel:FindFirstChild("RootPart")
+            if root then
+                local produceSpeed = root:GetAttribute("ProduceSpeed")
+                if type(produceSpeed) ~= "number" then
+                    produceSpeed = tonumber(produceSpeed) or 0
+                end
+                if produceSpeed and produceSpeed > 0 then
+                    total += produceSpeed
+                end
+            end
+        end
+    end
+    return total
+end
+
 local function hasEggUID(uid)
     local pg = Player:FindFirstChild("PlayerGui")
     local Data = pg and pg:FindFirstChild("Data")
@@ -111,6 +137,7 @@ local function hasPetUID(uid)
 end
 
 local function postReportChunk(commandId, chunkResults)
+    if not commandId then return false end
     local payload = json.encode({
         playerName = Player.Name,
         commandId  = commandId,
@@ -127,21 +154,287 @@ local function postReportChunk(commandId, chunkResults)
     if not ok then
         warn("[report] ส่งผลลัพธ์ไม่สำเร็จ:", tostring(err))
     end
+    return ok
+end
+
+local function updateHatchReadySummary(job, stateOverride)
+    if not job then return end
+    local state = stateOverride
+    if not state then
+        if job.processed >= job.total then
+            if job.failed == 0 then
+                state = "completed"
+            elseif job.success == 0 then
+                state = "failed"
+            else
+                state = "partial"
+            end
+        else
+            state = "running"
+        end
+    end
+
+    lastHatchReadySummary = {
+        commandId = job.commandId,
+        total = job.total,
+        processed = job.processed,
+        success = job.success,
+        failed = job.failed,
+        state = state,
+        message = job.lastMessage,
+        updatedAt = nowSec(),
+    }
+end
+
+local function flushHatchResults(job, force)
+    if not job then return end
+    if not job.pending or #job.pending == 0 then return end
+    if not force then
+        local shouldFlush = false
+        if job.batchSize and #job.pending >= job.batchSize then
+            shouldFlush = true
+        elseif job.flushInterval and job.lastFlush and (tick() - job.lastFlush) >= job.flushInterval then
+            shouldFlush = true
+        end
+        if not shouldFlush then return end
+    end
+
+    local sent = true
+    if job.commandId then
+        sent = postReportChunk(job.commandId, job.pending)
+    end
+    if sent then
+        job.pending = {}
+        job.lastFlush = tick()
+    end
+    return sent
+end
+
+local function pushHatchResult(job, uid, ok, reason, stateOverride)
+    if not job then return end
+    job.processed += 1
+    if ok then
+        job.success += 1
+    else
+        job.failed += 1
+        if reason and reason ~= "" then
+            job.lastMessage = reason
+        end
+    end
+
+    table.insert(job.pending, { uid = uid, ok = ok, reason = ok and nil or reason })
+    flushHatchResults(job, false)
+    updateHatchReadySummary(job, stateOverride)
+end
+
+local function failRemaining(job, startIndex, reason, stateOverride)
+    if not job then return end
+    local msg = reason or "cancelled"
+    for idx = startIndex, job.total do
+        local uid = job.queue[idx]
+        pushHatchResult(job, uid, false, msg, stateOverride)
+    end
+    flushHatchResults(job, true)
 end
 -- =======================
 -- 4) COMMAND EXECUTORS
 -- =======================
+local function getReadyEggUIDs(preferredUIDs)
+    local result = {}
+    if type(preferredUIDs) == "table" then
+        for _, uid in ipairs(preferredUIDs) do
+            if type(uid) == "string" and #uid > 0 then
+                table.insert(result, uid)
+            end
+        end
+        if #result > 0 then return result end
+        result = {}
+    end
+
+    local pg = Player:FindFirstChild("PlayerGui")
+    local Data = pg and pg:FindFirstChild("Data")
+    local OwnedEggData = Data and Data:FindFirstChild("Egg")
+    if not OwnedEggData then return result end
+
+    local serverTimeObj = getServerTimeObj()
+    local nowValue = serverTimeObj and tonumber(serverTimeObj.Value) or nil
+
+    for _, egg in ipairs(OwnedEggData:GetChildren()) do
+        local placed = egg:FindFirstChild("DI") ~= nil
+        if placed then
+            local deadline = egg:GetAttribute("D")
+            if deadline then
+                if nowValue and nowValue >= deadline then
+                    table.insert(result, egg.Name)
+                elseif not nowValue then
+                    -- หากไม่มีเวลาเซิร์ฟเวอร์ ให้ถือว่าไข่ที่มี deadline แล้วเป็นพร้อมฟัก
+                    table.insert(result, egg.Name)
+                end
+            end
+        end
+    end
+
+    return result
+end
+
+local function hatchEgg(uid)
+    local EggModel = BlockFolder:FindFirstChild(uid)
+    if not EggModel then return false, "egg_model_missing" end
+    local RootPart = EggModel.PrimaryPart or EggModel:FindFirstChild("RootPart")
+    if not RootPart then return false, "missing_root" end
+    local RF = RootPart:FindFirstChild("RF")
+    if not (RF and RF:IsA("RemoteFunction")) then return false, "no_remote" end
+
+    local okInvoke, err = pcall(function()
+        return RF:InvokeServer("Hatch")
+    end)
+    if not okInvoke then
+        return false, "invoke_fail: " .. tostring(err)
+    end
+
+    local start = tick()
+    while tick() - start < config.ackTimeout do
+        task.wait(0.3)
+        if not hasEggUID(uid) then return true end
+        if not BlockFolder:FindFirstChild(uid) then return true end
+    end
+    return false, "timeout"
+end
+
 local function executeHatchCommand(uid)
     print("ได้รับคำสั่งให้ฟักไข่ UID: " .. tostring(uid))
-    local EggModel = BlockFolder:FindFirstChild(uid)
-    if not EggModel then print("!!! ERROR: ไม่พบโมเดลของไข่ UID: " .. uid); return end
-    local RootPart = EggModel.PrimaryPart or EggModel:FindFirstChild("RootPart")
-    local RF = RootPart and RootPart:FindFirstChild("RF")
-    if RF and RF:IsA("RemoteFunction") then
-        task.spawn(function()
-            pcall(function() RF:InvokeServer("Hatch") end)
+    task.spawn(function()
+        local ok, reason = hatchEgg(uid)
+        if not ok then
+            warn(string.format("[Hatch] ฟักไข่ %s ไม่สำเร็จ: %s", tostring(uid), tostring(reason)))
+        end
+    end)
+end
+
+local function executeHatchReadyCommand(command)
+    task.spawn(function()
+        local commandId = command.id
+        local readyUIDs = getReadyEggUIDs(command.uids)
+        if #readyUIDs == 0 then
+            if commandId then
+                postReportChunk(commandId, { { uid = "", ok = false, reason = "no_ready" } })
+            end
+            lastHatchReadySummary = {
+                commandId = commandId,
+                total = 0,
+                processed = 0,
+                success = 0,
+                failed = 0,
+                state = "empty",
+                message = "no_ready",
+                updatedAt = nowSec(),
+            }
+            print("[HatchReady] ไม่มีไข่ที่พร้อมฟัก")
+            return
+        end
+
+        local deduped = {}
+        local seen = {}
+        for _, uid in ipairs(readyUIDs) do
+            if type(uid) == "string" and uid ~= "" and not seen[uid] then
+                table.insert(deduped, uid)
+                seen[uid] = true
+            end
+        end
+        readyUIDs = deduped
+
+        if #readyUIDs == 0 then
+            if commandId then
+                postReportChunk(commandId, { { uid = "", ok = false, reason = "invalid_uids" } })
+            end
+            lastHatchReadySummary = {
+                commandId = commandId,
+                total = 0,
+                processed = 0,
+                success = 0,
+                failed = 0,
+                state = "empty",
+                message = "invalid_uids",
+                updatedAt = nowSec(),
+            }
+            print("[HatchReady] ไม่มี UID ที่พร้อมฟักหลังจากตรวจสอบข้อมูล")
+            return
+        end
+
+        if activeHatchJob then
+            activeHatchJob.cancelRequested = true
+            activeHatchJob.lastMessage = "superseded"
+        end
+
+        local job = {
+            commandId = commandId,
+            queue = readyUIDs,
+            total = #readyUIDs,
+            processed = 0,
+            success = 0,
+            failed = 0,
+            pending = {},
+            batchSize = 10,
+            flushInterval = 1.0,
+            lastFlush = tick(),
+            cancelRequested = false,
+            lastMessage = nil,
+        }
+        activeHatchJob = job
+
+        print(string.format("[HatchReady] เริ่มงานฟักไข่ %d ใบ", job.total))
+        updateHatchReadySummary(job, "starting")
+
+        local ok, err = pcall(function()
+            for idx = 1, job.total do
+                if job.cancelRequested then
+                    print("[HatchReady] ยกเลิกงานฟักไข่ตามคำสั่งใหม่")
+                    failRemaining(job, idx, "cancelled", "cancelled")
+                    return
+                end
+
+                local uid = job.queue[idx]
+                local okHatch, reason = hatchEgg(uid)
+                pushHatchResult(job, uid, okHatch, okHatch and nil or reason)
+                task.wait(0.3)
+            end
         end)
-    end
+
+        if not ok then
+            local errMsg = tostring(err)
+            warn(string.format("[HatchReady] งานฟักไข่ล้มเหลว: %s", errMsg))
+            job.lastMessage = errMsg
+            failRemaining(job, job.processed + 1, errMsg, "error")
+        end
+
+        flushHatchResults(job, true)
+        if job.commandId and job.pending and #job.pending > 0 then
+            for _ = 1, 5 do
+                if #job.pending == 0 then break end
+                task.wait(1.5)
+                local sent = flushHatchResults(job, true)
+                if sent and (#job.pending == 0) then break end
+            end
+        end
+
+        local finalState
+        if job.cancelRequested then
+            finalState = "cancelled"
+        elseif job.failed == 0 then
+            finalState = "completed"
+        elseif job.success == 0 then
+            finalState = "failed"
+        else
+            finalState = "partial"
+        end
+        print(string.format("[HatchReady] งานจบด้วยสถานะ %s (สำเร็จ %d / ล้มเหลว %d จาก %d)", finalState, job.success, job.failed, job.total))
+        updateHatchReadySummary(job, finalState)
+
+        mustSendFull = true
+        if activeHatchJob == job then
+            activeHatchJob = nil
+        end
+    end)
 end
 
 function executeSendItemsCommand(commandId, targetPlayerName, itemUIDs)
@@ -317,10 +610,6 @@ local function buildSlimFromFull(inv)
     return slim
 end
 
--- =======================
--- 6) MAIN LOOP (Slim/Full + Commands)
--- =======================
-local mustSendFull = true
 local lastFullAt   = 0
 
 local function processCommands(commands)
@@ -328,6 +617,9 @@ local function processCommands(commands)
     for _, command in ipairs(commands) do
         if command.action == "hatch" and command.uid then
             executeHatchCommand(command.uid)
+
+        elseif command.action == "hatch_ready" then
+            executeHatchReadyCommand(command)
 
         elseif command.action == "send_items" and command.target and command.uids then
             -- รองรับ ACK: มี command.id มาจากเซิร์ฟเวอร์
@@ -340,7 +632,7 @@ local function processCommands(commands)
     end
 end
 
-local function getServerTimeObj()
+getServerTimeObj = function()
     return ReplicatedStorage:FindFirstChild("Time")
 end
 
@@ -385,6 +677,8 @@ local function sendDataAndCheckCommands()
         playerName       = Player.Name,
         coin             = coin,
         todayGiftCount   = getTodayGiftCount(),
+        farmIncomePerSec = getTotalFarmIncomePerSecond(),
+        hatchReadyJob    = lastHatchReadySummary,
         updateInterval   = config.updateInterval,
         serverPlayerList = getAllPlayersInServer(),
         inventorySlim    = slim,         -- ส่ง Slim ทุกครั้ง
