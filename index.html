@@ -713,6 +713,29 @@
         const full=getFull(pd); const sl=getSlim(pd);
 
         if(tab==='eggs'){
+          const readyEggs = (full?.eggs||[]).filter(e=>e.readyToHatch && e.uid);
+          if(full){
+            if(readyEggs.length){
+              const hatchBtn=document.createElement('button');
+              hatchBtn.className='btn';
+              hatchBtn.textContent=`ฟักไข่พร้อม (${readyEggs.length})`;
+              hatchBtn.onclick=()=>hatchReadyEggsForSelected(readyEggs.map(e=>e.uid));
+              tools.appendChild(hatchBtn);
+            }else{
+              const note=document.createElement('div');
+              note.className='muted';
+              note.style.padding='6px 0';
+              note.textContent='ไม่มีไข่ที่พร้อมฟัก';
+              tools.appendChild(note);
+            }
+          }else{
+            const note=document.createElement('div');
+            note.className='muted';
+            note.style.padding='6px 0';
+            note.textContent='กำลังโหลดข้อมูลเต็ม...';
+            tools.appendChild(note);
+          }
+
           const rows = full ? (()=>{ const map=new Map(); (full.eggs||[]).forEach(e=>{ if(e.placed) return; const k=`${e.type}|${e.mutation||'None'}`; map.set(k,(map.get(k)||0)+1); }); return Array.from(map.entries()).map(([k,c])=>{const [t,m]=k.split('|'); return{type:t,muta:m,count:c};}).sort((a,b)=>b.count-a.count||a.type.localeCompare(b.type)); })() : (sl.eggsAgg||[]);
           if(!rows || rows.length===0){ list.innerHTML='<div class="muted" style="padding:10px;">กำลังโหลดข้อมูลเต็มหรือไม่มีรายการ</div>'; }
           else rows.forEach(r=>{ const row=document.createElement('div'); row.className='row'; row.innerHTML=`<div class="grow"><b>${r.type}</b> <span class="chip">${r.muta}</span></div><div><b>${r.count}</b></div>`; list.appendChild(row); });
@@ -730,6 +753,47 @@
     }
 
     /* ======= Trade ======= */
+    async function hatchReadyEggsForSelected(uids){
+      if(!selectedPlayer){ alert('โปรดเลือกผู้เล่นก่อน'); return; }
+      const uniqueUIDs=[...new Set((uids||[]).filter(uid=>typeof uid==='string'&&uid.trim().length>0))];
+      if(uniqueUIDs.length===0){ alert('ไม่มีไข่พร้อมฟัก'); return; }
+      if(!confirm(`ยืนยันฟักไข่พร้อมฟักทั้งหมด ${uniqueUIDs.length} ฟองของ ${selectedPlayer}?`)) return;
+
+      try{
+        const res=await fetch('/command',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({playerName:selectedPlayer,action:'hatch_ready',uids:uniqueUIDs})});
+        const j=await res.json();
+        if(j.status==='noop'){ alert('ไม่มีไข่พร้อมฟัก'); return; }
+        if(!j.commandId){ alert('คิวคำสั่งไม่สำเร็จ'); return; }
+
+        TaskCenter.add({
+          id:j.commandId,
+          title:`Hatch Ready • ${selectedPlayer}`,
+          subtitle:`${uniqueUIDs.length} ฟอง`,
+          total:uniqueUIDs.length
+        });
+
+        const statusMap=await waitForCommands([j.commandId],{
+          onTick:(m)=>TaskCenter.updateFromStatusMap(m)
+        });
+
+        TaskCenter.updateFromStatusMap(statusMap);
+        const st=statusMap[j.commandId];
+        if(st){
+          autoClearTask(j.commandId, st.failed>0?20000:12000);
+          if(st.failed>0){
+            alert(`ฟักสำเร็จ ${st.success||0} / ${st.total||uniqueUIDs.length} ฟอง (ล้มเหลว ${st.failed})`);
+          }else{
+            alert(`ฟักไข่สำเร็จ ${st.success||st.total||uniqueUIDs.length} ฟอง`);
+          }
+        }
+
+        await updateDashboard();
+      }catch(err){
+        console.error(err);
+        alert('เกิดข้อผิดพลาดระหว่างฟักไข่พร้อมฟัก');
+      }
+    }
+
     let tradeSelection={};
     function myFull(){ return playersData[selectedPlayer]?.inventory || null; }
     document.getElementById('open-trade-btn').onclick=()=>{

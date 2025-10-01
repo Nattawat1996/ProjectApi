@@ -76,6 +76,39 @@ def post_command():
         }
         return jsonify({"status": "queued", "commandId": cid})
 
+    elif action == "hatch_ready":
+        uids = data.get("uids")
+        ready_uids = []
+        if isinstance(uids, list):
+            ready_uids = [uid for uid in uids if isinstance(uid, str) and uid]
+        else:
+            player_snapshot = players_data.get(player, {})
+            inv = player_snapshot.get("inventory") or {}
+            for egg in inv.get("eggs", []):
+                uid = egg.get("uid")
+                if uid and egg.get("readyToHatch"):
+                    ready_uids.append(uid)
+
+        if not ready_uids:
+            return jsonify({"status": "noop", "message": "ไม่มีไข่พร้อมฟัก"})
+
+        cid = new_id()
+        command_queue[player].append({
+            "id": cid,
+            "action": "hatch_ready",
+            "uids": ready_uids,
+        })
+        command_status[cid] = {
+            "id": cid,
+            "state": "queued",
+            "total": len(ready_uids),
+            "completed": 0,
+            "success": 0,
+            "failed": 0,
+            "createdAt": int(time.time()),
+        }
+        return jsonify({"status": "queued", "commandId": cid, "count": len(ready_uids)})
+
     elif action == "request_full":
         # ขอให้ client ส่ง Full snapshot รอบถัดไป
         cid = new_id()

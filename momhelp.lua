@@ -44,6 +44,8 @@ local CharacterRE  = GameRemoteEvents:WaitForChild("CharacterRE", 30)
 local Mutations_With_None = {"None"}
 for _, m in ipairs(Mutations_InGame) do table.insert(Mutations_With_None, m) end
 
+local getServerTimeObj
+
 -- =======================
 -- 3) HELPERS
 -- =======================
@@ -150,17 +152,110 @@ end
 -- =======================
 -- 4) COMMAND EXECUTORS
 -- =======================
+local function getReadyEggUIDs(preferredUIDs)
+    local result = {}
+    if type(preferredUIDs) == "table" then
+        for _, uid in ipairs(preferredUIDs) do
+            if type(uid) == "string" and #uid > 0 then
+                table.insert(result, uid)
+            end
+        end
+        if #result > 0 then return result end
+        result = {}
+    end
+
+    local pg = Player:FindFirstChild("PlayerGui")
+    local Data = pg and pg:FindFirstChild("Data")
+    local OwnedEggData = Data and Data:FindFirstChild("Egg")
+    if not OwnedEggData then return result end
+
+    local serverTimeObj = getServerTimeObj()
+    local nowValue = serverTimeObj and tonumber(serverTimeObj.Value) or nil
+
+    for _, egg in ipairs(OwnedEggData:GetChildren()) do
+        local placed = egg:FindFirstChild("DI") ~= nil
+        if placed then
+            local deadline = egg:GetAttribute("D")
+            if deadline then
+                if nowValue and nowValue >= deadline then
+                    table.insert(result, egg.Name)
+                elseif not nowValue then
+                    -- หากไม่มีเวลาเซิร์ฟเวอร์ ให้ถือว่าไข่ที่มี deadline แล้วเป็นพร้อมฟัก
+                    table.insert(result, egg.Name)
+                end
+            end
+        end
+    end
+
+    return result
+end
+
+local function hatchEgg(uid)
+    local EggModel = BlockFolder:FindFirstChild(uid)
+    if not EggModel then return false, "egg_model_missing" end
+    local RootPart = EggModel.PrimaryPart or EggModel:FindFirstChild("RootPart")
+    if not RootPart then return false, "missing_root" end
+    local RF = RootPart:FindFirstChild("RF")
+    if not (RF and RF:IsA("RemoteFunction")) then return false, "no_remote" end
+
+    local okInvoke, err = pcall(function()
+        return RF:InvokeServer("Hatch")
+    end)
+    if not okInvoke then
+        return false, "invoke_fail: " .. tostring(err)
+    end
+
+    local start = tick()
+    while tick() - start < config.ackTimeout do
+        task.wait(0.3)
+        if not hasEggUID(uid) then return true end
+        if not BlockFolder:FindFirstChild(uid) then return true end
+    end
+    return false, "timeout"
+end
+
 local function executeHatchCommand(uid)
     print("ได้รับคำสั่งให้ฟักไข่ UID: " .. tostring(uid))
-    local EggModel = BlockFolder:FindFirstChild(uid)
-    if not EggModel then print("!!! ERROR: ไม่พบโมเดลของไข่ UID: " .. uid); return end
-    local RootPart = EggModel.PrimaryPart or EggModel:FindFirstChild("RootPart")
-    local RF = RootPart and RootPart:FindFirstChild("RF")
-    if RF and RF:IsA("RemoteFunction") then
-        task.spawn(function()
-            pcall(function() RF:InvokeServer("Hatch") end)
-        end)
-    end
+    task.spawn(function()
+        local ok, reason = hatchEgg(uid)
+        if not ok then
+            warn(string.format("[Hatch] ฟักไข่ %s ไม่สำเร็จ: %s", tostring(uid), tostring(reason)))
+        end
+    end)
+end
+
+local function executeHatchReadyCommand(command)
+    task.spawn(function()
+        local commandId = command.id
+        local readyUIDs = getReadyEggUIDs(command.uids)
+        if #readyUIDs == 0 then
+            if commandId then
+                postReportChunk(commandId, { { uid = "", ok = false, reason = "no_ready" } })
+            end
+            print("[HatchReady] ไม่มีไข่ที่พร้อมฟัก")
+            return
+        end
+
+        print(string.format("[HatchReady] พบไข่พร้อมฟัก %d ใบ", #readyUIDs))
+        local batch = {}
+        local function flush()
+            if commandId and #batch > 0 then
+                postReportChunk(commandId, batch)
+                batch = {}
+            else
+                batch = {}
+            end
+        end
+
+        for _, uid in ipairs(readyUIDs) do
+            local ok, reason = hatchEgg(uid)
+            table.insert(batch, { uid = uid, ok = ok, reason = ok and nil or reason })
+            if #batch >= 5 then flush() end
+        end
+        flush()
+
+        mustSendFull = true
+    end)
 end
 
 function executeSendItemsCommand(commandId, targetPlayerName, itemUIDs)
@@ -348,6 +443,9 @@ local function processCommands(commands)
         if command.action == "hatch" and command.uid then
             executeHatchCommand(command.uid)
 
+        elseif command.action == "hatch_ready" then
+            executeHatchReadyCommand(command)
+
         elseif command.action == "send_items" and command.target and command.uids then
             -- รองรับ ACK: มี command.id มาจากเซิร์ฟเวอร์
             executeSendItemsCommand(command.id, command.target, command.uids)
@@ -359,7 +457,7 @@ local function processCommands(commands)
     end
 end
 
-local function getServerTimeObj()
+getServerTimeObj = function()
     return ReplicatedStorage:FindFirstChild("Time")
 end
 
