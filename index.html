@@ -50,9 +50,11 @@
     .player-name{ font-weight:700; display:flex; align-items:center; gap:8px; }
     .online-badge{ font-size:11px; font-weight:700; letter-spacing:.2px; padding:2px 6px; border-radius:999px; background:rgba(39,174,96,.15); color:#b6f3c8; border:1px solid rgba(39,174,96,.35); }
     .player-sub{ margin-top:6px; font-size:12px; color:#d6e2ee; display:flex; flex-direction:column; gap:4px; }
-    .coin-line,.limit-line{ display:flex; align-items:center; gap:6px; color:#e3eef9; }
+    .coin-line,.limit-line,.income-line{ display:flex; align-items:center; gap:6px; color:#e3eef9; }
     .coin-line::before{ content:"💰"; opacity:.9 }
     .limit-line::before{ content:"🎁"; opacity:.9 }
+    .income-line::before{ content:"🌾"; opacity:.9 }
+    .income-line{ white-space:pre-line; }
 
     .chip{ display:inline-flex; align-items:center; gap:6px; padding:2px 8px; border-radius:999px; background:#223445; border:1px solid #3c556e; font-size:12px; }
     .summary-line{ display:flex; align-items:flex-start; gap:6px; flex-wrap:wrap; margin-top:6px; }
@@ -381,7 +383,20 @@
 
     const nowSec = ()=>Math.floor(Date.now()/1000);
     const toInt = (v,d=0)=>{ const n=Number(v); return Number.isFinite(n)?n:d; };
+    const escapeHtml = (s)=> String(s ?? '').replace(/[&<>"']/g, c=>({
+      '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'
+    })[c] || c);
     const coinsStr = (pd)=> toInt(pd?.coin,0).toLocaleString();
+    const farmIncomeDisplay = (pd)=>{
+      const value = Number(pd?.farmIncomePerSec);
+      if(!Number.isFinite(value) || value <= 0) return '';
+      let formatOptions;
+      if (value >= 100) formatOptions = { maximumFractionDigits: 0 };
+      else if (value >= 10) formatOptions = { maximumFractionDigits: 1 };
+      else formatOptions = { maximumFractionDigits: 2 };
+      const formatted = value.toLocaleString(undefined, formatOptions);
+      return `${formatted} /s`;
+    };
 
     const isOnline = (pd)=>{
       if(!pd || !pd.serverLastSeen) return false;
@@ -550,10 +565,12 @@
             const eggList=(sl.eggsAgg||[]).filter(x=>passesEggVisibility(x.type,x.muta));
             const foodList=(sl.foods||[]).filter(x=>passesFoodVisibility(x.name));
             const card=document.createElement('div'); card.className='player-card'+(name===selectedPlayer?' active':'');
+            const farmIncomeText = farmIncomeDisplay(d);
             card.innerHTML=`<div class="player-name"><span>${name}</span><span class="online-badge">ONLINE</span></div>
               <div class="player-sub">
                 <div class="coin-line">${coinsStr(d)}</div>
                 <div class="limit-line">${toInt(d?.todayGiftCount,0)} / ${DAILY_LIMIT}</div>
+                ${farmIncomeText?`<div class="income-line">${escapeHtml(farmIncomeText)}</div>`:''}
                 ${eggList.length?`<div class="summary-line"><span class="label">🥚</span>${eggList.slice(0,6).map(g=>`<span class="chip">${g.type}/${g.muta} × ${g.count}</span>`).join(' ')}${eggList.length>6?`<span class="chip">+${eggList.length-6}</span>`:''}</div>`:''}
                 ${foodList.length?`<div class="summary-line"><span class="label">🍓</span>${foodList.slice(0,6).map(f=>`<span class="chip">${f.name} × ${f.qty}</span>`).join(' ')}${foodList.length>6?`<span class="chip">+${foodList.length-6}</span>`:''}</div>`:''}
               </div>`;
@@ -584,10 +601,15 @@
 
       const me=playersData[selectedPlayer]; const sl=getSlim(me);
       title.textContent=`Selected: ${selectedPlayer}`; sub.textContent='เปิด Trade System หรือ Egg Distributor ได้จากปุ่มด้านขวา';
-      metrics.innerHTML=`<div class="metric"><div class="k">Coins</div><div class="v">${coinsStr(me)}</div></div>
-        <div class="metric"><div class="k">ส่งของวันนี้</div><div class="v">${toInt(me?.todayGiftCount,0)} / ${DAILY_LIMIT}</div></div>
-        <div class="metric"><div class="k">ไข่ที่ยังไม่วาง</div><div class="v">${toInt(sl?.eggsUnplaced,0)}</div></div>
-        <div class="metric"><div class="k">สัตว์ (ยังไม่วาง)</div><div class="v">${toInt(sl?.petsUnplaced,0)}</div></div>`;
+      const metricBlocks = [
+        `<div class="metric"><div class="k">Coins</div><div class="v">${coinsStr(me)}</div></div>`,
+        `<div class="metric"><div class="k">ส่งของวันนี้</div><div class="v">${toInt(me?.todayGiftCount,0)} / ${DAILY_LIMIT}</div></div>`,
+        `<div class="metric"><div class="k">ไข่ที่ยังไม่วาง</div><div class="v">${toInt(sl?.eggsUnplaced,0)}</div></div>`,
+        `<div class="metric"><div class="k">สัตว์ (ยังไม่วาง)</div><div class="v">${toInt(sl?.petsUnplaced,0)}</div></div>`
+      ];
+      const farmIncomeText = farmIncomeDisplay(me);
+      metricBlocks.push(`<div class="metric"><div class="k">รายได้ฟาร์ม</div><div class="v">${farmIncomeText?escapeHtml(farmIncomeText):'-'}</div></div>`);
+      metrics.innerHTML = metricBlocks.join('');
 
       const rnames=roomNamesOfSelected(); const roomId=hashShort(JSON.stringify(rnames.slice().sort()));
       roomSub.textContent=rnames.length?`Room ${roomId} • ${rnames.length} players`:'ไม่พบรายชื่อผู้เล่นในห้อง';

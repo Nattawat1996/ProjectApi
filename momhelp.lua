@@ -94,6 +94,25 @@ local function getFoodQty(name)
     return tonumber(all[name]) or 0
 end
 
+local function getTotalFarmIncomePerSecond()
+    local total = 0
+    for _, petModel in ipairs(PetsFolder:GetChildren()) do
+        if petModel:GetAttribute("UserId") == Player.UserId then
+            local root = petModel.PrimaryPart or petModel:FindFirstChild("RootPart")
+            if root then
+                local produceSpeed = root:GetAttribute("ProduceSpeed")
+                if type(produceSpeed) ~= "number" then
+                    produceSpeed = tonumber(produceSpeed) or 0
+                end
+                if produceSpeed and produceSpeed > 0 then
+                    total += produceSpeed
+                end
+            end
+        end
+    end
+    return total
+end
+
 local function hasEggUID(uid)
     local pg = Player:FindFirstChild("PlayerGui")
     local Data = pg and pg:FindFirstChild("Data")
@@ -385,6 +404,7 @@ local function sendDataAndCheckCommands()
         playerName       = Player.Name,
         coin             = coin,
         todayGiftCount   = getTodayGiftCount(),
+        farmIncomePerSec = getTotalFarmIncomePerSecond(),
         updateInterval   = config.updateInterval,
         serverPlayerList = getAllPlayersInServer(),
         inventorySlim    = slim,         -- ส่ง Slim ทุกครั้ง
